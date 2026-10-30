@@ -1,0 +1,26 @@
+# Codemagic build: produces SplashCut.apk on every push to main (or when you tap "Start new build").
+workflows:
+  splashcut-apk:
+    name: SplashCut APK
+    instance_type: mac_mini_m2
+    max_build_duration: 30
+    environment:
+      java: 17
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: main
+          include: true
+    scripts:
+      - name: Point Gradle at the Android SDK
+        script: |
+          echo "sdk.dir=${ANDROID_SDK_ROOT:-$ANDROID_HOME}" > "$CM_BUILD_DIR/local.properties"
+      - name: Build the APK
+        script: |
+          chmod +x ./gradlew
+          export GITHUB_RUN_NUMBER="${BUILD_NUMBER:-1}"
+          ./gradlew :app:assembleRelease --no-daemon --stacktrace
+          cp app/build/outputs/apk/release/app-release.apk "$CM_BUILD_DIR/SplashCut.apk"
+    artifacts:
+      - SplashCut.apk
