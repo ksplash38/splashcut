@@ -12,8 +12,8 @@ android {
         applicationId 'com.splashcut.app'
         minSdk 26
         targetSdk 34
-        versionCode buildNumber
-        versionName "1.0.${buildNumber}"
+        versionCode 200 + buildNumber
+        versionName "2.1.${buildNumber}"
     }
 
     signingConfigs {
