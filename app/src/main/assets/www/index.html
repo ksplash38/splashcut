@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#0b0d14">
+<title>SplashCut</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- Home -->
+  <section id="home" class="screen">
+    <header class="home-top">
+      <div class="logo" aria-label="SplashCut">
+        <svg viewBox="0 0 40 40" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#36d7ff"/><stop offset="1" stop-color="#ff5a87"/></linearGradient></defs><path d="M20 3c6 8 12 13 12 21a12 12 0 0 1-24 0c0-8 6-13 12-21z" fill="url(#lg)"/><path d="M12 25l16-9M12 16l16 9" stroke="#0b0d14" stroke-width="2.6" stroke-linecap="round"/></svg>
+        <span>Splash<b>Cut</b></span>
+      </div>
+    </header>
+    <button type="button" class="new-project" id="newProject">
+      <span class="np-plus" aria-hidden="true">+</span>
+      <span><b>New project</b><small>Pick videos and photos to start</small></span>
+    </button>
+    <div class="home-ai">
+      <span class="chip-ai">✦ AI built in</span>
+      <span>Auto captions · Beat sync · Silence cut · Background blur · Smart enhance</span>
+    </div>
+    <h2 class="home-h">Projects</h2>
+    <div id="projects" class="projects"></div>
+  </section>
+
+  <!-- Editor -->
+  <section id="editor" class="screen" hidden>
+    <header class="ed-top">
+      <button type="button" class="ibtn" id="edBack" aria-label="Back to projects">‹</button>
+      <input id="projName" class="proj-name" aria-label="Project name" maxlength="40">
+      <button type="button" class="ibtn" id="undo" aria-label="Undo">↶</button>
+      <button type="button" class="ibtn" id="redo" aria-label="Redo">↷</button>
+      <button type="button" class="export-btn" id="exportBtn">Export</button>
+    </header>
+
+    <div class="stage" id="stage">
+      <canvas id="cv"></canvas>
+      <div class="stage-msg" id="stageMsg" hidden></div>
+    </div>
+
+    <div class="transport">
+      <span class="time" id="timeNow">0:00.0</span><span class="time dim" id="timeTotal">/ 0:00.0</span>
+      <button type="button" class="play" id="playBtn" aria-label="Play">▶</button>
+      <div class="zoom"><button type="button" class="ibtn sm" id="zoomOut" aria-label="Zoom out timeline">−</button><button type="button" class="ibtn sm" id="zoomIn" aria-label="Zoom in timeline">+</button></div>
+    </div>
+
+    <div class="tl-wrap">
+      <div class="tl" id="tl">
+        <div class="tl-in" id="tlIn">
+          <div class="ruler" id="ruler"></div>
+          <div class="track t-main" id="trMain"></div>
+          <div class="track t-ov" id="trOv"></div>
+          <div class="track t-au" id="trAu"></div>
+        </div>
+      </div>
+      <div class="playhead" aria-hidden="true"></div>
+      <button type="button" class="tl-add" id="tlAdd" aria-label="Add videos or photos">+</button>
+    </div>
+
+    <nav class="toolbar" id="toolbar" aria-label="Tools"></nav>
+  </section>
+
+  <!-- Bottom sheet -->
+  <div class="sheet-back" id="sheetBack" hidden></div>
+  <section class="sheet" id="sheet" hidden aria-modal="true" role="dialog" aria-labelledby="sheetTitle">
+    <header class="sheet-h"><h3 id="sheetTitle"></h3><button type="button" class="done" id="sheetDone">Done</button></header>
+    <div class="sheet-b" id="sheetBody"></div>
+  </section>
+
+  <!-- Busy overlay (export, AI) -->
+  <div class="busy" id="busy" hidden>
+    <div class="busy-card">
+      <div class="ring"><svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="20"/><circle id="ringFg" cx="24" cy="24" r="20" class="fg"/></svg><span id="busyPct">0%</span></div>
+      <b id="busyTitle">Working</b>
+      <p id="busyText"></p>
+      <div class="busy-actions" id="busyActions"></div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <input type="file" id="fileIn" hidden>
+</div>
+<script src="app.js"></script>
+</body>
+</html>
