@@ -47,7 +47,7 @@ public class MainActivity extends Activity {
     private PermissionRequest pendingPermission;
     private final Map<String, Save> saves = new HashMap<>();
 
-    private static class Save { Uri uri; File file; OutputStream out; String mime; }
+    private static class Save { Uri uri; File file; OutputStream out; String mime; boolean image; }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -202,18 +202,20 @@ public class MainActivity extends Activity {
             try {
                 Save s = new Save();
                 s.mime = (mime == null || mime.isEmpty()) ? "video/mp4" : mime.split(";")[0];
+                s.image = s.mime.startsWith("image/");
                 if (Build.VERSION.SDK_INT >= 29) {
                     ContentValues cv = new ContentValues();
-                    cv.put(MediaStore.Video.Media.DISPLAY_NAME, name);
-                    cv.put(MediaStore.Video.Media.MIME_TYPE, s.mime);
-                    cv.put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/SplashCut");
-                    cv.put(MediaStore.Video.Media.IS_PENDING, 1);
-                    s.uri = getContentResolver().insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, cv);
+                    cv.put(MediaStore.MediaColumns.DISPLAY_NAME, name);
+                    cv.put(MediaStore.MediaColumns.MIME_TYPE, s.mime);
+                    cv.put(MediaStore.MediaColumns.RELATIVE_PATH, (s.image ? Environment.DIRECTORY_PICTURES : Environment.DIRECTORY_MOVIES) + "/SplashCut");
+                    cv.put(MediaStore.MediaColumns.IS_PENDING, 1);
+                    s.uri = getContentResolver().insert(s.image ? MediaStore.Images.Media.EXTERNAL_CONTENT_URI : MediaStore.Video.Media.EXTERNAL_CONTENT_URI, cv);
                     if (s.uri == null) return "";
                     s.out = new BufferedOutputStream(getContentResolver().openOutputStream(s.uri), 1 << 16);
                 } else {
-                    File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "SplashCut");
-                    if (!dir.exists() && !dir.mkdirs()) dir = getExternalFilesDir(Environment.DIRECTORY_MOVIES);
+                    String dirType = s.image ? Environment.DIRECTORY_PICTURES : Environment.DIRECTORY_MOVIES;
+                    File dir = new File(Environment.getExternalStoragePublicDirectory(dirType), "SplashCut");
+                    if (!dir.exists() && !dir.mkdirs()) dir = getExternalFilesDir(dirType);
                     s.file = new File(dir, name);
                     s.out = new BufferedOutputStream(new FileOutputStream(s.file), 1 << 16);
                 }
@@ -246,7 +248,7 @@ public class MainActivity extends Activity {
                 s.out.close();
                 if (s.uri != null) {
                     ContentValues cv = new ContentValues();
-                    cv.put(MediaStore.Video.Media.IS_PENDING, 0);
+                    cv.put(MediaStore.MediaColumns.IS_PENDING, 0);
                     getContentResolver().update(s.uri, cv, null, null);
                     return s.uri.toString();
                 }
@@ -273,9 +275,9 @@ public class MainActivity extends Activity {
 
     private void startShare(Uri uri, String mime) {
         Intent send = new Intent(Intent.ACTION_SEND);
-        send.setType(mime == null || mime.isEmpty() ? "video/*" : mime.split(";")[0]);
+        send.setType(mime == null || mime.isEmpty() ? "*/*" : mime.split(";")[0]);
         send.putExtra(Intent.EXTRA_STREAM, uri);
         send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        try { startActivity(Intent.createChooser(send, "Share video")); } catch (Exception ignored) { }
+        try { startActivity(Intent.createChooser(send, "Share")); } catch (Exception ignored) { }
     }
 }
