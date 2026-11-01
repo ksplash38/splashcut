@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-<meta name="theme-color" content="#0b0d14">
+<meta name="theme-color" content="#111111">
 <title>SplashCut</title>
-<link rel="stylesheet" href="style.css?v=2.1">
+<link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
 <div id="app">
@@ -14,17 +14,19 @@
   <section id="home" class="screen">
     <header class="home-top">
       <div class="logo" aria-label="SplashCut">
-        <svg viewBox="0 0 40 40" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#36d7ff"/><stop offset="1" stop-color="#ff5a87"/></linearGradient></defs><path d="M20 3c6 8 12 13 12 21a12 12 0 0 1-24 0c0-8 6-13 12-21z" fill="url(#lg)"/><path d="M12 25l16-9M12 16l16 9" stroke="#0b0d14" stroke-width="2.6" stroke-linecap="round"/></svg>
-        <span>Splash<b>Cut</b></span><small class="ver">v2.1</small>
+        <svg viewBox="0 0 40 40" aria-hidden="true"><path d="M20 3c6 8 12 13 12 21a12 12 0 0 1-24 0c0-8 6-13 12-21z" fill="#c9a45c"/><path d="M13 25.5l14-8M13 17.5l14 8" stroke="#111" stroke-width="2.4" stroke-linecap="round"/></svg>
+        <span>Splash<b>Cut</b></span><small class="ver">v3</small>
       </div>
+      <button type="button" class="acct-chip" id="acctChip" aria-label="Account"><span class="av">◦</span><span>Sign in</span></button>
     </header>
     <button type="button" class="new-project" id="newProject">
-      <span class="np-plus" aria-hidden="true">+</span>
+      <span class="np-plus" aria-hidden="true"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span>
       <span><b>New project</b><small>Pick videos and photos to start</small></span>
     </button>
+    <button type="button" class="pro-banner" id="proBanner" hidden></button>
     <div class="home-ai">
-      <span class="chip-ai">✦ AI built in</span>
-      <span>Captions · Remove background · Relight · Stabilize · Auto frame · Motion tracking · Noise reduction · Auto reel · Beat sync</span>
+      <span class="chip-ai">AI built in</span>
+      <span>Captions · Remove background · Relight · Stabilize · Auto frame · Motion tracking · Noise reduction · Split screen · 4K export</span>
     </div>
     <h2 class="home-h">Projects</h2>
     <div id="projects" class="projects"></div>
@@ -37,7 +39,7 @@
       <input id="projName" class="proj-name" aria-label="Project name" maxlength="40">
       <button type="button" class="ibtn" id="undo" aria-label="Undo">↶</button>
       <button type="button" class="ibtn" id="redo" aria-label="Redo">↷</button>
-      <button type="button" class="export-btn" id="exportBtn">Export</button>
+      <button type="button" class="export-btn" id="exportBtn"><svg class="i" viewBox="0 0 24 24"><path d="M12 15V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v5h14v-5"/></svg>Export</button>
     </header>
 
     <div class="stage" id="stage">
@@ -47,7 +49,11 @@
 
     <div class="transport">
       <span class="time" id="timeNow">0:00.0</span><span class="time dim" id="timeTotal">/ 0:00.0</span>
-      <button type="button" class="play" id="playBtn" aria-label="Play">▶</button>
+      <div class="tmid">
+        <button type="button" class="ibtn sm" id="stepBack" aria-label="Previous frame"><svg class="i" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
+        <button type="button" class="play" id="playBtn" aria-label="Play"></button>
+        <button type="button" class="ibtn sm" id="stepFwd" aria-label="Next frame"><svg class="i" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
+      </div>
       <div class="zoom"><button type="button" class="ibtn sm" id="zoomOut" aria-label="Zoom out timeline">−</button><button type="button" class="ibtn sm" id="zoomIn" aria-label="Zoom in timeline">+</button></div>
     </div>
 
@@ -62,7 +68,7 @@
         </div>
       </div>
       <div class="playhead" aria-hidden="true"></div>
-      <button type="button" class="tl-add" id="tlAdd" aria-label="Add videos or photos">+</button>
+      <button type="button" class="tl-add" id="tlAdd" aria-label="Add videos or photos"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
     </div>
 
     <nav class="toolbar" id="toolbar" aria-label="Tools"></nav>
@@ -85,9 +91,12 @@
     </div>
   </div>
 
+  <!-- SplashCut Pro paywall -->
+  <section class="pro" id="pro" hidden aria-modal="true" role="dialog" aria-label="SplashCut Pro"></section>
+
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <input type="file" id="fileIn" hidden>
 </div>
-<script src="app.js?v=2.1"></script>
+<script src="app.js?v=3"></script>
 </body>
 </html>

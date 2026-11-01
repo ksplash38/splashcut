@@ -1,0 +1,4 @@
+/vendor
+/.env
+/storage/app/installed
+/storage/*.key

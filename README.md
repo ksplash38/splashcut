@@ -1,6 +1,15 @@
 # SplashCut
 
-A mobile video editor for Android with built-in AI tools.
+A mobile video editor for Android with built-in AI tools, and the kaybiz.in website that handles accounts and Pro subscriptions.
+
+## Accounts and Pro (v3)
+
+- Editing is free without an account. Exporting asks people to create an account, which starts a free Pro trial (30 days by default, set in the admin).
+- When the trial ends, the app shows the SplashCut Pro screen with your plans. People pay with Paystack (instant) or by bank transfer, which you approve in the admin.
+- Pro unlocks export in 720p, 1080p and 4K.
+- The website, admin and API live in `website/` (Laravel 11). See `website/INSTALL.txt` for cPanel setup. The app talks to `https://kaybiz.in/api`.
+
+**New editing tools in v3:** sound effects, split-screen layouts, copy and paste style, replace clip, beauty smoothing, Ken Burns and slow zoom animations, loudness levelling, mute all clips, frame-by-frame stepping, snapping on the timeline, background colours, 21:9 format and 4K export.
 
 ## Install on your phone
 

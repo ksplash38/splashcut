@@ -1,0 +1,1 @@
+<svg viewBox="0 0 40 40" aria-hidden="true"><path d="M20 3c6 8 12 13 12 21a12 12 0 0 1-24 0c0-8 6-13 12-21z" fill="#c9a45c"/><path d="M13 25.5l14-8M13 17.5l14 8" stroke="#111" stroke-width="2.4" stroke-linecap="round"/></svg>

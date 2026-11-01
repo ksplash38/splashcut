@@ -1,0 +1,34 @@
+SPLASHCUT WEBSITE FOR kaybiz.in: INSTALLATION (cPanel)
+
+1. PHP version
+   cPanel > MultiPHP Manager (or "Select PHP Version"): set kaybiz.in to PHP 8.2 or 8.3.
+
+2. Free SSL (required, the app only connects over https)
+   cPanel > SSL/TLS Status > select kaybiz.in > Run AutoSSL.
+
+3. Database
+   cPanel > MySQL Databases:
+   - Create a database, e.g. splashcut  (cPanel names it youruser_splashcut)
+   - Create a user with a strong password (youruser_scadmin)
+   - Add the user to the database and tick ALL PRIVILEGES.
+   Write down the full database name, user name and password.
+
+4. Upload
+   cPanel > File Manager > public_html
+   - Move any old website files out of public_html first (or delete them if you don't need them).
+   - Upload kaybiz-splashcut-website.zip, right-click it > Extract, then delete the zip.
+   - Settings (top right) > tick "Show Hidden Files" and check that .htaccess and .env are there.
+
+5. Install
+   Open https://kaybiz.in/install in your browser. Fill in the database details and choose your
+   admin email and password. You will land on the admin sign-in page.
+
+6. Set up in the admin (https://kaybiz.in/admin)
+   - Plans & prices: set your monthly / quarterly / yearly prices.
+   - Payment settings: add your bank accounts, WhatsApp number, trial days (default 30),
+     and your Paystack public and secret keys (Paystack dashboard > Settings > API Keys & Webhooks).
+     In Paystack, set the Webhook URL to https://kaybiz.in/paystack/webhook
+   - App download: upload SplashCut.apk. If the upload is too big for your hosting, use File Manager
+     to upload it to  storage/app/private/apk/SplashCut.apk  instead.
+
+Never share your Paystack secret key with anyone. Type it only into the admin Payment settings page.

@@ -2,6 +2,8 @@ package com.splashcut.app;
 
 import android.Manifest;
 import android.app.Activity;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.ContentValues;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
@@ -53,13 +55,13 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        getWindow().setStatusBarColor(0xFF0B0D14);
-        getWindow().setNavigationBarColor(0xFF0B0D14);
+        getWindow().setStatusBarColor(0xFF111111);
+        getWindow().setNavigationBarColor(0xFF111111);
 
         if ((getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0) WebView.setWebContentsDebuggingEnabled(true);
 
         web = new WebView(this);
-        web.setBackgroundColor(0xFF0B0D14);
+        web.setBackgroundColor(0xFF111111);
         setContentView(web);
 
         final WebViewAssetLoader loader = new WebViewAssetLoader.Builder()
@@ -259,6 +261,26 @@ public class MainActivity extends Activity {
             } catch (Exception e) {
                 return "";
             }
+        }
+
+        @JavascriptInterface
+        public void openUrl(String url) {
+            runOnUiThread(() -> {
+                try {
+                    Uri u = Uri.parse(url);
+                    String scheme = u.getScheme();
+                    if (!"https".equals(scheme) && !"http".equals(scheme)) return;
+                    startActivity(new Intent(Intent.ACTION_VIEW, u).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                } catch (Exception ignored) { }
+            });
+        }
+
+        @JavascriptInterface
+        public void copy(String text) {
+            runOnUiThread(() -> {
+                ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                if (cm != null) cm.setPrimaryClip(ClipData.newPlainText("SplashCut", text));
+            });
         }
 
         @JavascriptInterface
