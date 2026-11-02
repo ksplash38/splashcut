@@ -287,7 +287,7 @@ async function sampleGray(m, from, to, fps, w, onp) {
 
 /* ================= Project model ================= */
 let P = null, sel = null;
-const DEF_TF = (s = 1) => ({ x: .5, y: .5, s, r: 0, o: 1 });
+const DEF_TF = (s = 1) => ({ x: .5, y: .5, s, r: 0, o: 1, w: 1, h: 1 });
 function newProject(ratio) {
   const d = new Date();
   return { v: 2, id: uid(), name: 'Project ' + d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) + ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }),
@@ -365,19 +365,21 @@ const isVI = () => sel && (sel.type === 'clip' || sel.type === 'layer');
 function clean(p) { return JSON.parse(JSON.stringify(p, (k, v) => k.startsWith('_') ? undefined : v)); }
 
 /* keyframes */
-const TFK = ['x', 'y', 's', 'r', 'o'];
+const TFK = ['x', 'y', 's', 'r', 'o', 'w', 'h'];
 function interpKf(kf, local, base) {
   if (!kf || !kf.length) return base;
-  if (local <= kf[0].t) return kf[0];
-  const last = kf[kf.length - 1]; if (local >= last.t) return last;
+  // Keyframes made before width/height existed fall back to the item's own values.
+  const v = (f, k) => f[k] != null ? f[k] : base[k] != null ? base[k] : 1;
+  if (local <= kf[0].t) return { ...base, ...kf[0] };
+  const last = kf[kf.length - 1]; if (local >= last.t) return { ...base, ...last };
   for (let i = 0; i < kf.length - 1; i++) {
     const a = kf[i], b = kf[i + 1];
-    if (local <= b.t) { const u = easeIO((local - a.t) / Math.max(1e-6, b.t - a.t)), o = {}; TFK.forEach(k => o[k] = lerp(a[k], b[k], u)); return o; }
+    if (local <= b.t) { const u = easeIO((local - a.t) / Math.max(1e-6, b.t - a.t)), o = {}; TFK.forEach(k => o[k] = lerp(v(a, k), v(b, k), u)); return o; }
   }
-  return last;
+  return { ...base, ...last };
 }
 const tfAt = (c, local) => interpKf(c.kf, local, c.tf);
-function ovBase(o) { return { x: o.x, y: o.y, s: o.scale || 1, r: o.rot || 0, o: o.opacity == null ? 1 : o.opacity }; }
+function ovBase(o) { return { x: o.x, y: o.y, s: o.scale || 1, r: o.rot || 0, o: o.opacity == null ? 1 : o.opacity, w: o.sw || 1, h: o.sh || 1 }; }
 function ovTf(o, local) {
   const r = { ...interpKf(o.kf, local, ovBase(o)) };
   if (o.track && o.track.length) { const p = sampleTrack(o.track, local); r.x = p.x; r.y = p.y; }
@@ -400,7 +402,7 @@ function setTf(item, patch, local, ov) {
     if (!k) { const cur = ov ? ovTf(item, local) : tfAt(item, local); k = { t: +local.toFixed(3) }; TFK.forEach(n => k[n] = cur[n]); item.kf.push(k); item.kf.sort((a, b) => a.t - b.t); }
     Object.assign(k, patch);
   } else if (ov) {
-    if (patch.x != null) item.x = patch.x; if (patch.y != null) item.y = patch.y; if (patch.s != null) item.scale = patch.s; if (patch.r != null) item.rot = patch.r; if (patch.o != null) item.opacity = patch.o;
+    if (patch.x != null) item.x = patch.x; if (patch.y != null) item.y = patch.y; if (patch.s != null) item.scale = patch.s; if (patch.r != null) item.rot = patch.r; if (patch.o != null) item.opacity = patch.o; if (patch.w != null) item.sw = patch.w; if (patch.h != null) item.sh = patch.h;
   } else Object.assign(item.tf, patch);
 }
 function localOf(item) {
@@ -677,9 +679,12 @@ function drawVI(tctx, c, t, W, H, isMain, noMb) {
   if (isMain && P.bg === 'blur' && G.fit !== 'cover' && !c.removeBg && !(c.mask && c.mask.type !== 'none')) {
     wg.filter = 'blur(' + Math.round(W / 40) + 'px) brightness(.6)'; const k = Math.max(W / pw, H / ph); wg.drawImage(prep, (W - pw * k) / 2, (H - ph * k) / 2, pw * k, ph * k); wg.filter = 'none';
   }
-  wg.save(); wg.translate(x, y); wg.rotate(rot * Math.PI / 180); wg.scale(sc, sc); wg.globalAlpha = clamp(op, 0, 1);
+  const tw = tf.w || 1, th = tf.h || 1;
+  wg.save(); wg.translate(x, y); wg.rotate(rot * Math.PI / 180); wg.scale(sc * tw, sc * th); wg.globalAlpha = clamp(op, 0, 1);
   wg.drawImage(prep, -G.dw / 2, -G.dh / 2, G.dw, G.dh); wg.restore(); wg.globalAlpha = 1;
-  c._box = { x, y, w: G.dw * sc, h: G.dh * sc, rot };
+  c._box = { x, y, w: G.dw * sc * tw, h: G.dh * sc * th, rot };
+  // The edit frame shows the resting size and place, without animations or shake.
+  c._frame = { x: tf.x * W, y: tf.y * H, w: G.dw * tf.s * tw, h: G.dh * tf.s * th, rot: tf.r };
   frameFx(c, t, W, H, isMain);
   let out = workC;
   if (fx.motionblur && !noMb && (playing || exporting)) {
@@ -820,7 +825,7 @@ function draw() {
   }
   for (const l of P.layers) if (t >= l._start && t < l._start + clipLen(l)) drawVI(g, l, t, W, H, false);
   drawOverlays(g, W, H, t);
-  if (!exporting && !offline && sel && sel.type === 'layer') { const it = findSel(); if (it && it._box && t >= it._start && t < it._start + clipLen(it)) outline(g, it._box, H); }
+  if (!exporting && !offline) { const fb = frameBox(); if (fb) drawFrame(g, fb.box); }
   if (pvGuides && !exporting && !offline) drawGuides(g, W, H, pvGuides);
 }
 // Draws one frame of a clip with transition tr at progress p (0 → 0.5 is the outgoing clip, 0.5 → 1 the incoming one).
@@ -849,6 +854,43 @@ function paintTransition(ctx, frame, W, H, tr, p, tmp, tx) {
     ctx.globalCompositeOperation = 'screen'; ctx.globalAlpha = .35 * k; ctx.drawImage(tmp, W * .012 * k, 0); ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
   }
 }
+/* Free transform: the selected item gets a frame with handles on the preview.
+   Corners resize evenly, the side handles stretch only the width or the height, the knob on top rotates. */
+function frameBox() {
+  if (!sel || !P || sel.type === 'au') return null;
+  const it = findSel(); if (!it || !it._frame) return null;
+  layout();
+  const on = sel.type === 'ov' ? T >= it.start && T < it.end : sel.type === 'clip' ? clipAt(T) === it : T >= it._start && T < it._start + clipLen(it);
+  return on ? { it, box: it._frame } : null;
+}
+const pxK = () => cv.width / Math.max(1, cv.getBoundingClientRect().width); // canvas pixels per screen pixel
+const handlePts = (b, k) => { const w = b.w / 2, h = b.h / 2; return [['nw', -w, -h], ['ne', w, -h], ['se', w, h], ['sw', -w, h], ['n', 0, -h], ['s', 0, h], ['e', w, 0], ['w', -w, 0], ['rot', 0, -h - 30 * k]]; };
+function drawFrame(ctx, b) {
+  const k = pxK();
+  ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(b.rot * Math.PI / 180);
+  ctx.lineWidth = 1.5 * k; ctx.strokeStyle = '#c9a45c'; ctx.strokeRect(-b.w / 2, -b.h / 2, b.w, b.h);
+  ctx.beginPath(); ctx.moveTo(0, -b.h / 2); ctx.lineTo(0, -b.h / 2 - 30 * k); ctx.stroke();
+  for (const [n, x, y] of handlePts(b, k)) {
+    ctx.fillStyle = '#ffffff'; ctx.strokeStyle = '#c9a45c'; ctx.lineWidth = 2 * k; ctx.beginPath();
+    if (n === 'rot') {
+      ctx.arc(x, y, 10 * k, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.beginPath(); ctx.arc(x, y, 4.5 * k, -Math.PI * .85, Math.PI * .55); ctx.strokeStyle = '#111'; ctx.lineWidth = 1.8 * k; ctx.stroke();
+      continue;
+    }
+    if (n.length === 1) { const v = n === 'e' || n === 'w'; roundRect(ctx, x - (v ? 3.5 : 10) * k, y - (v ? 10 : 3.5) * k, (v ? 7 : 20) * k, (v ? 20 : 7) * k, 3.5 * k); }
+    else ctx.arc(x, y, 7 * k, 0, Math.PI * 2);
+    ctx.fill(); ctx.stroke();
+  }
+  ctx.restore();
+}
+// Which handle (if any) is under a point on the canvas. Touching near the middle always moves the item instead.
+function handleAt(b, pt) {
+  const k = pxK(), a = -b.rot * Math.PI / 180, dx = pt.x - b.x, dy = pt.y - b.y, lx = dx * Math.cos(a) - dy * Math.sin(a), ly = dx * Math.sin(a) + dy * Math.cos(a);
+  if (Math.hypot(lx, ly) < 14 * k || (Math.abs(lx) < b.w / 2 - 14 * k && Math.abs(ly) < b.h / 2 - 14 * k)) return null;
+  let best = null, bd = 24 * k;
+  for (const [n, x, y] of handlePts(b, k)) { const d = Math.hypot(lx - x, ly - y); if (d < bd) { bd = d; best = n; } }
+  return best;
+}
 // Centre lines shown on the preview while an item is dragged onto the middle of the frame.
 let pvGuides = null;
 function drawGuides(ctx, W, H, gd) {
@@ -857,10 +899,9 @@ function drawGuides(ctx, W, H, gd) {
   if (gd.y) { ctx.beginPath(); ctx.moveTo(0, H / 2); ctx.lineTo(W, H / 2); ctx.stroke(); }
   ctx.restore();
 }
-function outline(ctx, b, H) { ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(b.rot * Math.PI / 180); ctx.setLineDash([H / 80, H / 140]); ctx.lineWidth = Math.max(2, H / 400); ctx.strokeStyle = '#c9a45c'; ctx.strokeRect(-b.w / 2, -b.h / 2, b.w, b.h); ctx.restore(); }
 function drawOverlays(ctx, W, H, t) {
   for (const o of P.overlays) {
-    if (t < o.start || t >= o.end) { o._box = null; continue; }
+    if (t < o.start || t >= o.end) { o._box = o._frame = null; continue; }
     const local = t - o.start, len = o.end - o.start, tf = ovTf(o, local);
     let alpha = tf.o, sc = tf.s, dy = 0, dx = 0, rot = tf.r, text = o.text;
     const inP = clamp(local / 0.4, 0, 1), outP = clamp((len - local) / 0.25, 0, 1);
@@ -882,7 +923,8 @@ function drawOverlays(ctx, W, H, t) {
     const px = (o.size || 6) / 100 * H, f = FONTS[o.font] || FONTS.classic;
     ctx.save();
     ctx.globalAlpha = clamp(alpha, 0, 1);
-    ctx.translate(tf.x * W + dx, tf.y * H + dy); ctx.rotate(rot * Math.PI / 180); ctx.scale(sc, sc);
+    const tw = tf.w || 1, th = tf.h || 1;
+    ctx.translate(tf.x * W + dx, tf.y * H + dy); ctx.rotate(rot * Math.PI / 180); ctx.scale(sc * tw, sc * th);
     ctx.font = o.type === 'sticker' ? `${px}px "Noto Color Emoji","Apple Color Emoji","Segoe UI Emoji",sans-serif` : `${f[1]} ${px}px ${f[2]}`;
     if ('letterSpacing' in ctx) ctx.letterSpacing = o.spacing ? `${(o.spacing * px / 100).toFixed(1)}px` : '0px';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -901,11 +943,8 @@ function drawOverlays(ctx, W, H, t) {
         ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
       } else ctx.fillText(l, 0, y);
     });
-    o._box = { x: tf.x * W + dx, y: tf.y * H + dy, w: boxW * sc, h: boxH * sc, rot };
-    if (!exporting && !offline && sel && sel.type === 'ov' && sel.id === o.id) {
-      ctx.globalAlpha = 1; ctx.setLineDash([px * 0.15, px * 0.1]); ctx.lineWidth = Math.max(2, H / 400) / sc; ctx.strokeStyle = '#c9a45c';
-      ctx.strokeRect(-boxW / 2, -boxH / 2, boxW, boxH); ctx.setLineDash([]);
-    }
+    o._box = { x: tf.x * W + dx, y: tf.y * H + dy, w: boxW * sc * tw, h: boxH * sc * th, rot };
+    o._frame = { x: tf.x * W, y: tf.y * H, w: boxW * tf.s * tw, h: boxH * tf.s * th, rot: tf.r };
     ctx.restore();
   }
 }
@@ -951,7 +990,7 @@ let pps = 60;
 const tl = $('#tl');
 let progScroll = -1;
 const pad = () => Math.round(tl.clientWidth / 2);
-function followTimeline() { const x = Math.round(T * pps); if (Math.abs(tl.scrollLeft - x) > 0.5) { progScroll = x; tl.scrollLeft = x; } }
+function followTimeline() { if (dragging) return; const x = Math.round(T * pps); if (Math.abs(tl.scrollLeft - x) > 0.5) { progScroll = x; tl.scrollLeft = x; } }
 tl.addEventListener('scroll', () => {
   if (progScroll >= 0 && Math.abs(tl.scrollLeft - progScroll) <= 1) { progScroll = -1; return; }
   progScroll = -1;
@@ -959,13 +998,18 @@ tl.addEventListener('scroll', () => {
   if (playing) pause();
   T = clamp(tl.scrollLeft / pps, 0, duration()); syncMedia(false); requestDraw(); updTime();
 }, { passive: true });
+// Rows for a track: items keep the row they were dragged to (it.lane) when it is free, the rest fill the first free row.
 function lanes(items, startOf, endOf) {
-  const ends = [], out = {};
-  [...items].sort((a, b) => startOf(a) - startOf(b)).forEach(it => {
-    let l = ends.findIndex(e => e <= startOf(it) + 1e-3); if (l < 0) { l = ends.length; ends.push(0); }
-    ends[l] = endOf(it); out[it.id] = l;
-  });
-  return { map: out, n: ends.length };
+  const rows = [], out = {}, sorted = [...items].sort((a, b) => startOf(a) - startOf(b));
+  const free = (l, s, e) => !(rows[l] || []).some(([a, b]) => s < b - 1e-3 && e > a + 1e-3);
+  const put = (l, it) => { (rows[l] = rows[l] || []).push([startOf(it), endOf(it)]); out[it.id] = l; };
+  for (const it of sorted) if (it.lane != null && free(it.lane, startOf(it), endOf(it))) put(it.lane, it);
+  for (const it of sorted) if (out[it.id] == null) { let l = 0; while (!free(l, startOf(it), endOf(it))) l++; put(l, it); }
+  // Drop empty rows so the track stays compact.
+  const used = rows.map((r, i) => r && r.length ? i : -1).filter(i => i >= 0), re = {};
+  used.forEach((l, i) => { re[l] = i; });
+  for (const id in out) out[id] = re[out[id]];
+  return { map: out, n: used.length };
 }
 function kfMarks(item) {
   if (!sel || sel.id !== item.id || !item.kf || !item.kf.length) return '';
@@ -985,13 +1029,21 @@ function renderTimeline() {
   for (const b of P.beats) if (b <= D) r += `<span class="beat" style="left:${pd + b * pps}px"></span>`;
   $('#ruler').innerHTML = r;
   layout();
+  // While dragging: the item is lifted and follows the finger; a main clip trimmed on its left keeps its right end still.
+  const dg = dragging, lift = it => dg && dg.item === it ? ' lift' : '', dyCss = it => dg && dg.item === it && dg.moved && dg.dy ? `transform:translateY(${dg.dy}px);` : '';
+  // Short items get a minimum width and slimmer (or no) trim handles so their body is easy to grab.
+  const wpxOf = (len, min) => Math.max(min, len * pps - 2), small = w => w < 34 ? ' tiny2' : w < 64 ? ' tiny' : '';
   let h = '';
   P.clips.forEach((c, i) => {
     const m = media[c.mediaId], len = clipLen(c), isSel = sel && sel.type === 'clip' && sel.id === c.id, tags = viTags(c);
-    h += `<div class="blk${isSel ? ' sel' : ''}" data-k="clip" data-id="${c.id}" style="left:${pd + c._start * pps}px;width:${Math.max(4, len * pps - 2)}px;${m && m.thumb ? `background-image:url(${m.thumb})` : ''}">
+    let left = c._start;
+    if (dg && dg.moved && dg.k === 'clip' && dg.h === 'l' && i >= dg.idx) left += dg.shift;
+    if (dg && dg.moved && dg.item === c && dg.h === 'move') left = dg.s0 + dg.dx;
+    const w = wpxOf(len, 4);
+    h += `<div class="blk${isSel ? ' sel' : ''}${lift(c)}${small(w)}" data-k="clip" data-id="${c.id}" style="left:${pd + left * pps}px;width:${w}px;${dyCss(c)}${m && m.thumb ? `background-image:url(${m.thumb})` : ''}">
       ${tags.length ? `<span class="tags">${tags.map(x => `<span>${x}</span>`).join('')}</span>` : ''}<span class="lbl">${fmtS(len)}</span>${kfMarks(c)}
       <span class="hdl l" data-h="l"></span><span class="hdl r" data-h="r"></span></div>`;
-    if (i < P.clips.length - 1) h += `<button type="button" class="trn${c.transition !== 'none' ? ' on' : ''}" data-trn="${c.id}" style="left:${pd + (c._start + len) * pps}px" aria-label="Transition">${c.transition !== 'none' ? '⧓' : '|'}</button>`;
+    if (i < P.clips.length - 1) h += `<button type="button" class="trn${c.transition !== 'none' ? ' on' : ''}" data-trn="${c.id}" style="left:${pd + (left + len) * pps}px" aria-label="Transition">${c.transition !== 'none' ? '⧓' : '|'}</button>`;
   });
   if (!P.clips.length) h = `<div class="tl-empty">Tap + to add videos or photos</div>`;
   $('#trMain').innerHTML = h;
@@ -1001,68 +1053,165 @@ function renderTimeline() {
     for (const it of items) $(`${rowId} .lane[data-lane="${L.map[it.id]}"]`).insertAdjacentHTML('beforeend', html(it));
   };
   lane('#trLy', P.layers, l => l.start, l => l.start + clipLen(l), l => {
-    const m = media[l.mediaId], isSel = sel && sel.type === 'layer' && sel.id === l.id, tags = viTags(l);
-    return `<div class="blk layer${isSel ? ' sel' : ''}" data-k="layer" data-id="${l.id}" style="left:${pd + l.start * pps}px;width:${Math.max(4, clipLen(l) * pps - 2)}px;${m && m.thumb ? `background-image:url(${m.thumb})` : ''}"><span class="lbl">${tags.join(' ')} ${fmtS(clipLen(l))}</span>${kfMarks(l)}<span class="hdl l" data-h="l"></span><span class="hdl r" data-h="r"></span></div>`;
+    const m = media[l.mediaId], isSel = sel && sel.type === 'layer' && sel.id === l.id, tags = viTags(l), w = wpxOf(clipLen(l), 26);
+    return `<div class="blk layer${isSel ? ' sel' : ''}${lift(l)}${small(w)}" data-k="layer" data-id="${l.id}" style="left:${pd + l.start * pps}px;width:${w}px;${dyCss(l)}${m && m.thumb ? `background-image:url(${m.thumb})` : ''}"><span class="lbl">${tags.join(' ')} ${fmtS(clipLen(l))}</span>${kfMarks(l)}<span class="hdl l" data-h="l"></span><span class="hdl r" data-h="r"></span></div>`;
   });
   lane('#trOv', P.overlays, o => o.start, o => o.end, o => {
-    const isSel = sel && sel.type === 'ov' && sel.id === o.id, cls = o.type === 'sticker' ? 'sticker' : o.caption ? 'cap' : 'text';
-    return `<div class="blk ${cls}${isSel ? ' sel' : ''}" data-k="ov" data-id="${o.id}" style="left:${pd + o.start * pps}px;width:${Math.max(4, (o.end - o.start) * pps - 2)}px"><span class="lbl">${o.track ? 'TRK · ' : ''}${o.type === 'sticker' ? esc(o.text) : (o.caption ? 'CC · ' : '') + esc(o.text.replace(/\n/g, ' '))}</span>${kfMarks(o)}<span class="hdl l" data-h="l"></span><span class="hdl r" data-h="r"></span></div>`;
+    const isSel = sel && sel.type === 'ov' && sel.id === o.id, cls = o.type === 'sticker' ? 'sticker' : o.caption ? 'cap' : 'text', w = wpxOf(o.end - o.start, 26);
+    return `<div class="blk ${cls}${isSel ? ' sel' : ''}${lift(o)}${small(w)}" data-k="ov" data-id="${o.id}" style="left:${pd + o.start * pps}px;width:${w}px;${dyCss(o)}"><span class="lbl">${o.track ? 'TRK · ' : ''}${o.type === 'sticker' ? esc(o.text) : (o.caption ? 'CC · ' : '') + esc(o.text.replace(/\n/g, ' '))}</span>${kfMarks(o)}<span class="hdl l" data-h="l"></span><span class="hdl r" data-h="r"></span></div>`;
   });
   lane('#trAu', P.audio, a => a.start, a => a.start + auLen(a), a => {
-    const m = media[a.mediaId], isSel = sel && sel.type === 'au' && sel.id === a.id;
+    const m = media[a.mediaId], isSel = sel && sel.type === 'au' && sel.id === a.id, w = wpxOf(auLen(a), 26);
     const wave = m && m.wave ? `background-image:url(${m.wave});background-size:${m.duration / a.rate * pps}px 100%;background-position:${-a.in / a.rate * pps}px 0;` : '';
     const icon = a.kind === 'voice' ? 'Voice · ' : a.kind === 'extracted' ? 'Clip audio · ' : a.kind === 'sfx' ? 'SFX · ' : '';
-    return `<div class="blk ${a.kind}${isSel ? ' sel' : ''}" data-k="au" data-id="${a.id}" style="left:${pd + a.start * pps}px;width:${Math.max(4, auLen(a) * pps - 2)}px;${wave}"><span class="lbl">${icon}${esc(m ? m.name : 'Audio')}${a.afx && a.afx.preset !== 'none' ? ' · ' + AFX[a.afx.preset] : ''}</span><span class="hdl l" data-h="l"></span><span class="hdl r" data-h="r"></span></div>`;
+    return `<div class="blk ${a.kind}${isSel ? ' sel' : ''}${lift(a)}${small(w)}" data-k="au" data-id="${a.id}" style="left:${pd + a.start * pps}px;width:${w}px;${dyCss(a)}${wave}"><span class="lbl">${icon}${esc(m ? m.name : 'Audio')}${a.afx && a.afx.preset !== 'none' ? ' · ' + AFX[a.afx.preset] : ''}</span><span class="hdl l" data-h="l"></span><span class="hdl r" data-h="r"></span></div>`;
   });
+  // Highlight the row an item will land in when it is dropped.
+  $('#trMain').classList.toggle('drop', !!(dg && dg.row && dg.row.main));
+  if (dg && dg.row && dg.row.lane != null) {
+    const ls = $$(ROW_OF[dg.k] + ' .lane');
+    if (ls[dg.row.lane]) ls[dg.row.lane].classList.add('drop');
+    else $(ROW_OF[dg.k]).insertAdjacentHTML('beforeend', '<div class="lane drop fresh"><span>New row</span></div>');
+  }
   updTime(); followTimeline();
 }
 
-/* timeline interactions */
-let dragging = null;
-$('#tlIn').addEventListener('pointerdown', ev => {
-  if (ev.target.closest('[data-trn]')) return;
-  const blk = ev.target.closest('.blk'); if (!blk) return;
-  const k = blk.dataset.k, id = blk.dataset.id, h = ev.target.dataset.h;
-  if (!(sel && sel.type === k && sel.id === id)) return;
-  const item = findSel(); if (!item) return;
-  ev.preventDefault();
-  layout();
-  const s0 = k === 'clip' || k === 'layer' ? item._start : item.start, e0 = k === 'clip' || k === 'layer' ? item._start + clipLen(item) : k === 'ov' ? item.end : item.start + auLen(item);
-  dragging = { k, h: h || 'move', x0: ev.clientX, orig: deep(clean(item)), item, moved: false, T0: T, s0, e0, snapAt: null };
-  try { blk.setPointerCapture(ev.pointerId); } catch (e) { /* pointer already gone */ }
+/* timeline interactions
+   Tap an item to select it. A selected item drags straight away; any other item is picked up by holding it for a
+   moment. Drag the body to move it (up or down to change row, main clips also reorder), drag an edge to trim that
+   side. While dragging, the timeline stays still under the finger and scrolls by itself near the screen edges. */
+let dragging = null, hold = null, noClick = false, autoRaf = 0;
+const HOLD_MS = 260;
+const tlIn = $('#tlIn');
+const listOf = k => ({ clip: P.clips, layer: P.layers, ov: P.overlays, au: P.audio })[k];
+const spanOf = (k, it) => { layout(); return k === 'clip' || k === 'layer' ? [it._start, it._start + clipLen(it)] : k === 'ov' ? [it.start, it.end] : [it.start, it.start + auLen(it)]; };
+function startDrag(k, item, h, x, y) {
+  const [s0, e0] = spanOf(k, item);
+  dragging = { k, h, x0: x, y0: y, cx: x, cy: y, sc0: tl.scrollLeft, orig: deep(clean(item)), item, moved: false, T0: T, s0, e0, snapAt: null, shift: 0, dx: 0, dy: 0, idx: P.clips.indexOf(item), row: null, at: null };
   if (playing) pause();
+}
+function cancelHold() { if (hold) { clearTimeout(hold.t); hold = null; } }
+tlIn.addEventListener('pointerdown', ev => {
+  if (ev.target.closest('[data-trn]') || pinch.on) return;
+  const blk = ev.target.closest('.blk'); if (!blk) return;
+  const k = blk.dataset.k, id = blk.dataset.id, item = (listOf(k) || []).find(x => x.id === id); if (!item) return;
+  if (sel && sel.type === k && sel.id === id) { ev.preventDefault(); startDrag(k, item, ev.target.dataset.h || 'move', ev.clientX, ev.clientY); return; }
+  // Not selected yet: holding still for a moment picks it up, moving straight away scrolls the timeline instead.
+  cancelHold();
+  hold = { x: ev.clientX, y: ev.clientY, pid: ev.pointerId, t: setTimeout(() => {
+    const hd = hold; hold = null; if (!hd || pinch.on) return;
+    select({ type: k, id }); haptic('snap');
+    const it2 = (listOf(k) || []).find(x => x.id === id); if (!it2) return;
+    startDrag(k, it2, 'move', hd.x, hd.y); dragging.lift = true; noClick = true; renderTimeline();
+  }, HOLD_MS) };
 });
-$('#tlIn').addEventListener('pointermove', ev => {
+tlIn.addEventListener('pointermove', ev => {
+  if (hold && ev.pointerId === hold.pid) { if (Math.hypot(ev.clientX - hold.x, ev.clientY - hold.y) > 8) cancelHold(); return; }
   if (!dragging) return;
-  const d = dragging, dt = (ev.clientX - d.x0) / pps, o = d.orig, it = d.item;
-  if (Math.abs(ev.clientX - d.x0) > 3) d.moved = true;
-  if (!d.moved) return;
+  const d = dragging; d.cx = ev.clientX; d.cy = ev.clientY;
+  if (!d.moved && Math.hypot(d.cx - d.x0, d.cy - d.y0) > 4) { d.moved = true; noClick = true; try { tlIn.setPointerCapture(ev.pointerId); } catch (e) { /* pointer already gone */ } }
+  if (d.moved) { dragStep(); autoScroll(); }
+});
+// Keeps the timeline from scrolling away while an item is being dragged.
+tlIn.addEventListener('touchmove', e => { if (dragging && e.touches.length === 1 && e.cancelable) e.preventDefault(); }, { passive: false });
+// Shows the frame at the edge being dragged without moving the timeline.
+function peek(t) { T = clamp(t, 0, duration()); syncMedia(false); requestDraw(); updTime(); }
+function dragStep() {
+  const d = dragging; if (!d) return;
+  const dt = (d.cx - d.x0 + tl.scrollLeft - d.sc0) / pps, o = d.orig, it = d.item;
+  d.dx = dt; d.dy = d.h === 'move' ? d.cy - d.y0 : 0;
   if (d.k === 'clip' || d.k === 'layer') {
     const m = media[it.mediaId], max = m.kind === 'image' ? 3600 : m.duration, sp = it.kind === 'image' ? 1 : it.speed * (hasCurve(it) ? 1 / curveTab(it).total : 1);
     if (d.h === 'l') {
-      // Main-track clips start where the previous one ends, so only overlays can snap their left edge.
       const st = d.k === 'layer' ? snapEdge(o.start + dt, it, d.T0) : (showSnap(null), d.s0 + dt), ds = st - d.s0;
       if (it.kind === 'image') { it.out = clamp(o.out - ds, 0.3, 3600); if (d.k === 'layer') it.start = Math.max(0, o.start + (o.out - it.out)); }
       else { it.in = clamp(o.in + ds * sp, 0, it.out - 0.1); if (d.k === 'layer') it.start = Math.max(0, o.start + (it.in - o.in) / sp); }
-      layout(); seekTo(it._start);
-    } else if (d.h === 'r') { const en = snapEdge(d.e0 + dt, it, d.T0); it.out = clamp(o.out + (en - d.e0) * sp, it.in + 0.1, max); layout(); seekTo(it._start + clipLen(it) - 0.01); }
-    else if (d.k === 'layer') { it.start = snapStart(Math.max(0, o.start + dt), clipLen(it), d.T0, it); layout(); seekTo(it.start); }
-    else return;
+      layout();
+      // A main-track clip keeps its right end still while its left edge follows the finger; the gap closes on release.
+      if (d.k === 'clip') d.shift = (d.e0 - d.s0) - clipLen(it);
+      peek(it._start + 0.01);
+    } else if (d.h === 'r') { const en = snapEdge(d.e0 + dt, it, d.T0); it.out = clamp(o.out + (en - d.e0) * sp, it.in + 0.1, max); layout(); peek(it._start + clipLen(it) - 0.01); }
+    else if (d.k === 'layer') { it.start = snapStart(Math.max(0, o.start + dt), clipLen(it), d.T0, it); layout(); peek(it.start + 0.01); d.row = rowTarget(d); }
+    else { d.row = rowTarget(d); d.at = d.row ? null : reorderAt(d); showSnap(d.at ? d.at.t : null); }
   } else if (d.k === 'ov') {
     const len = o.end - o.start;
     if (d.h === 'l') it.start = clamp(snapEdge(o.start + dt, it, d.T0), 0, o.end - 0.2);
     else if (d.h === 'r') it.end = Math.max(o.start + 0.2, snapEdge(o.end + dt, it, d.T0));
-    else { it.start = snapStart(Math.max(0, o.start + dt), len, d.T0, it); it.end = it.start + len; }
-    seekTo(d.h === 'r' ? it.end - 0.01 : it.start);
+    else { it.start = snapStart(Math.max(0, o.start + dt), len, d.T0, it); it.end = it.start + len; d.row = rowTarget(d); }
+    peek(d.h === 'r' ? it.end - 0.01 : it.start + 0.01);
   } else {
     const m = media[it.mediaId], r = it.rate || 1;
     if (d.h === 'l') { const nd = clamp((snapEdge(o.start + dt, it, d.T0) - o.start) * r, -o.in, (o.out - o.in) - 0.2); it.in = o.in + nd; it.start = Math.max(0, o.start + nd / r); }
     else if (d.h === 'r') { const en = snapEdge(d.e0 + dt, it, d.T0); it.out = clamp(o.out + (en - d.e0) * r, o.in + 0.2, m.duration); }
-    else it.start = snapStart(Math.max(0, o.start + dt), auLen(it), d.T0, it);
-    seekTo(d.h === 'r' ? it.start + auLen(it) - 0.01 : it.start);
+    else { it.start = snapStart(Math.max(0, o.start + dt), auLen(it), d.T0, it); d.row = rowTarget(d); }
+    peek(d.h === 'r' ? it.start + auLen(it) - 0.01 : it.start + 0.01);
   }
   renderTimeline();
-});
+}
+// Where a main-track clip would land if dropped now: its index among the other clips and that cut's time on screen.
+function reorderAt(d) {
+  const mid = d.s0 + d.dx + (d.e0 - d.s0) / 2, others = P.clips.filter(c => c !== d.item); layout();
+  // Count the other clips whose middle (as shown on screen) is left of the dragged clip's middle.
+  const idx = others.filter(c => mid > c._start + clipLen(c) / 2).length, last = others[others.length - 1];
+  return { idx, t: others[idx] ? others[idx]._start : last ? last._start + clipLen(last) : 0 };
+}
+const ROW_OF = { clip: '#trLy', layer: '#trLy', ov: '#trOv', au: '#trAu' };
+// Which row the finger is over while moving an item up or down: { lane } for a row of its own kind,
+// { main } when an overlay video goes onto the main track. Small wobbles keep the item in its row.
+function rowTarget(d) {
+  if (Math.abs(d.cy - d.y0) < 16) return null;
+  const y = d.cy, mainR = $('#trMain').getBoundingClientRect();
+  if (d.k === 'layer' && y >= mainR.top && y <= mainR.bottom) return { main: true };
+  if (d.k === 'clip' && y <= mainR.bottom + 6) return null;
+  const ls = $$(ROW_OF[d.k] + ' .lane:not(.fresh)');
+  for (let i = 0; i < ls.length; i++) { const r = ls[i].getBoundingClientRect(); if (y >= r.top - 3 && y <= r.bottom + 3) return { lane: i }; }
+  const below = ls.length ? ls[ls.length - 1].getBoundingClientRect().bottom : (d.k === 'clip' ? mainR.bottom : $(ROW_OF[d.k]).getBoundingClientRect().top);
+  if (y > below && (d.k === 'au' || y < below + 46)) return { lane: ls.length, fresh: true };
+  return null;
+}
+const trackOf = k => k === 'layer' || k === 'clip' ? [P.layers, l => l.start, l => l.start + clipLen(l)] : k === 'ov' ? [P.overlays, o => o.start, o => o.end] : [P.audio, a => a.start, a => a.start + auLen(a)];
+// Pins every item of a track to the row it is shown in, then puts one item on row `lane`.
+function setLane(k, it, lane) {
+  const [list, so, eo] = trackOf(k), L = lanes(list.filter(x => x !== it), so, eo);
+  list.forEach(x => { if (x !== it) x.lane = L.map[x.id]; });
+  it.lane = lane;
+}
+function applyDrop(d) {
+  const it = d.item, r = d.row;
+  if (d.k === 'clip' && d.h === 'move') {
+    if (r && r.lane != null) {
+      // A main clip dragged down becomes an overlay video at the same time.
+      P.clips = P.clips.filter(c => c !== it);
+      it.start = Math.max(0, d.s0 + d.dx); it.tf = DEF_TF(.6); it.kf = []; it.transition = 'none'; it.blend = 'source-over';
+      P.layers.push(it); setLane('layer', it, r.lane); sel = { type: 'layer', id: it.id };
+      toast('Moved to the overlay row. Drag it on the preview to place it.');
+    } else if (d.at && d.at.idx !== d.idx) { P.clips = P.clips.filter(c => c !== it); P.clips.splice(d.at.idx, 0, it); toast('Clip moved'); }
+    return;
+  }
+  if (d.h !== 'move' || !r) return;
+  if (d.k === 'layer' && r.main) {
+    P.layers = P.layers.filter(x => x !== it);
+    const at = it.start; delete it.start; delete it.lane; it.tf = DEF_TF(1); it.kf = []; it.blend = 'source-over';
+    layout(); let idx = P.clips.findIndex(c => c._start + clipLen(c) / 2 > at); if (idx < 0) idx = P.clips.length;
+    P.clips.splice(idx, 0, it); sel = { type: 'clip', id: it.id }; toast('Moved to the main track');
+    return;
+  }
+  if (r.lane != null) setLane(d.k, it, r.lane);
+}
+function autoScroll() {
+  if (autoRaf) return;
+  const step = () => {
+    autoRaf = 0; const d = dragging; if (!d || !d.moved) return;
+    const r = tl.getBoundingClientRect(), edge = 44;
+    const v = d.cx < r.left + edge ? -Math.ceil((r.left + edge - d.cx) / 3) : d.cx > r.right - edge ? Math.ceil((d.cx - (r.right - edge)) / 3) : 0;
+    if (!v) return;
+    const before = tl.scrollLeft; tl.scrollLeft = before + v;
+    if (tl.scrollLeft !== before) dragStep();
+    autoRaf = requestAnimationFrame(step);
+  };
+  autoRaf = requestAnimationFrame(step);
+}
+function stopAuto() { cancelAnimationFrame(autoRaf); autoRaf = 0; }
 /* Magnetic timeline: edges click onto the playhead, beats, the end of the video and the edges of
    every other item. Each new snap buzzes and shows a gold line with a magnet. */
 function snapPts(self, beats) {
@@ -1093,10 +1242,22 @@ function showSnap(t) {
   ln.style.left = (pad() + t * pps) + 'px'; ln.hidden = false;
   if (dragging && dragging.snapAt !== t) { dragging.snapAt = t; haptic('snap'); ln.classList.remove('pop'); void ln.offsetWidth; ln.classList.add('pop'); }
 }
-function endDrag() { if (!dragging) return; const moved = dragging.moved; showSnap(null); dragging = null; if (moved) commit(); }
-$('#tlIn').addEventListener('pointerup', endDrag);
-$('#tlIn').addEventListener('pointercancel', endDrag);
-$('#tlIn').addEventListener('click', ev => {
+function endDrag() {
+  cancelHold();
+  if (!dragging) return;
+  const d = dragging; dragging = null; showSnap(null); stopAuto();
+  if (d.moved) {
+    applyDrop(d);
+    // The playhead stays where the timeline shows it, not at the edge that was dragged.
+    T = clamp(tl.scrollLeft / pps, 0, duration()); syncMedia(false);
+    commit(); renderToolbar();
+  } else renderTimeline();
+  setTimeout(() => { noClick = false; }, 60);
+}
+tlIn.addEventListener('pointerup', endDrag);
+tlIn.addEventListener('pointercancel', endDrag);
+tlIn.addEventListener('click', ev => {
+  if (noClick) { noClick = false; return; }
   const trn = ev.target.closest('[data-trn]');
   if (trn) { select({ type: 'clip', id: trn.dataset.trn }); openTool('transition'); return; }
   const blk = ev.target.closest('.blk');
@@ -1107,15 +1268,20 @@ $('#tlIn').addEventListener('click', ev => {
   const it = findSel(); layout();
   if (it) { const s = k === 'clip' || k === 'layer' ? it._start : it.start, e = k === 'clip' || k === 'layer' ? it._start + clipLen(it) : k === 'ov' ? it.end : it.start + auLen(it); if (T < s || T >= e) seekTo(s + 0.01); }
 });
-const pinch = { d0: 0, p0: 0 };
-tl.addEventListener('touchstart', e => { if (e.touches.length === 2) { pinch.d0 = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY); pinch.p0 = pps; } }, { passive: true });
-tl.addEventListener('touchmove', e => {
-  if (e.touches.length !== 2 || !pinch.d0) return;
-  e.preventDefault();
-  setZoom(pinch.p0 * Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY) / pinch.d0);
-}, { passive: false });
-tl.addEventListener('touchend', e => { if (e.touches.length < 2) pinch.d0 = 0; });
-function setZoom(v) { pps = clamp(v, 8, 400); renderTimeline(); }
+/* Zoom: pinch with two fingers anywhere on the timeline, the − / + buttons, or Ctrl + mouse wheel. */
+const pinch = { on: false, d0: 0, p0: 0 };
+const tDist = e => Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+tl.addEventListener('touchstart', e => {
+  if (e.touches.length !== 2) return;
+  cancelHold();
+  if (dragging) { const d = dragging; dragging = null; showSnap(null); stopAuto(); if (d.moved) Object.assign(d.item, d.orig); }
+  pinch.on = true; pinch.d0 = Math.max(1, tDist(e)); pinch.p0 = pps; tl.classList.add('pinching');
+}, { passive: true });
+tl.addEventListener('touchmove', e => { if (!pinch.on || e.touches.length !== 2) return; if (e.cancelable) e.preventDefault(); setZoom(pinch.p0 * tDist(e) / pinch.d0); }, { passive: false });
+const pinchEnd = e => { if (pinch.on && e.touches.length < 2) { pinch.on = false; tl.classList.remove('pinching'); renderTimeline(); } };
+tl.addEventListener('touchend', pinchEnd); tl.addEventListener('touchcancel', pinchEnd);
+tl.addEventListener('wheel', e => { if (!e.ctrlKey) return; e.preventDefault(); setZoom(pps * (e.deltaY < 0 ? 1.15 : 1 / 1.15)); }, { passive: false });
+function setZoom(v) { pps = clamp(v, 8, 400); renderTimeline(); const z = $('#zoomLvl'); if (z) z.textContent = Math.round(pps / 60 * 100) + '%'; }
 $('#zoomIn').onclick = () => setZoom(pps * 1.4);
 $('#zoomOut').onclick = () => setZoom(pps / 1.4);
 
@@ -1125,8 +1291,16 @@ const canvasPt = ev => { const r = cv.getBoundingClientRect(); return { x: (ev.c
 function curTf(it, kind) { const local = localOf(it); return kind === 'ov' ? ovTf(it, local) : tfAt(it, local); }
 cv.addEventListener('pointerdown', ev => {
   if (exporting || offline) return;
-  const pt = canvasPt(ev); pv.ptrs.set(ev.pointerId, pt); cv.setPointerCapture(ev.pointerId);
+  const pt = canvasPt(ev); pv.ptrs.set(ev.pointerId, pt); try { cv.setPointerCapture(ev.pointerId); } catch (e) { /* pointer already gone */ }
   if (pv.ptrs.size === 1) {
+    pv.handle = null;
+    const fb = frameBox(), hn = fb && handleAt(fb.box, pt);
+    if (hn) {
+      pv.it = fb.it; pv.kind = sel.type; pv.handle = hn;
+      pv.start = { x: pt.x, y: pt.y, tf: { ...curTf(fb.it, sel.type) }, box: { ...fb.box }, moved: false };
+      if (playing) pause();
+      return;
+    }
     let hit = null, kind = null;
     const ov = [...P.overlays].reverse().find(o => o._box && inBox(o._box, pt.x, pt.y));
     if (ov) { hit = ov; kind = 'ov'; }
@@ -1152,6 +1326,34 @@ cv.addEventListener('pointermove', ev => {
   // Magnets: the centre of the frame, upright angles and 100% size pull the item in, with a buzz.
   const near = (v, to, th) => Math.abs(v - to) < th;
   let gd;
+  if (pv.handle) {
+    if (pv.ptrs.size !== 1) return;
+    const b = s.box, t0 = s.tf, w0 = t0.w || 1, h0 = t0.h || 1, hn = pv.handle, a = -b.rot * Math.PI / 180, dx = pt.x - b.x, dy = pt.y - b.y;
+    const lx = dx * Math.cos(a) - dy * Math.sin(a), ly = dx * Math.sin(a) + dy * Math.cos(a);
+    let snap = false;
+    if (hn === 'rot') {
+      let r = t0.r + (Math.atan2(dy, dx) - Math.atan2(s.y - b.y, s.x - b.x)) * 180 / Math.PI;
+      r = ((r + 180) % 360 + 360) % 360 - 180;
+      const r90 = Math.round(r / 90) * 90; if (near(r, r90, 4)) { r = r90; snap = true; }
+      setTf(it, { r }, local, ov);
+    } else if (hn === 'e' || hn === 'w') {
+      // Width only. It clicks to the original shape (same as the height) and to 100%.
+      let w = clamp(w0 * Math.abs(lx) / Math.max(1, b.w / 2), .05, 20);
+      if (near(w, h0, .04)) { w = h0; snap = true; } else if (near(w, 1, .04)) { w = 1; snap = true; }
+      setTf(it, { w }, local, ov);
+    } else if (hn === 'n' || hn === 's') {
+      let hh = clamp(h0 * Math.abs(ly) / Math.max(1, b.h / 2), .05, 20);
+      if (near(hh, w0, .04)) { hh = w0; snap = true; } else if (near(hh, 1, .04)) { hh = 1; snap = true; }
+      setTf(it, { h: hh }, local, ov);
+    } else {
+      let sc = clamp(t0.s * Math.hypot(lx, ly) / Math.max(1, Math.hypot(b.w / 2, b.h / 2)), .05, 10);
+      if (near(sc, 1, .03)) { sc = 1; snap = true; }
+      setTf(it, { s: sc }, local, ov);
+    }
+    s.moved = true;
+    const key = snap ? 'h1' : 'h0'; if (key !== pv.snapKey && snap) haptic('snap'); pv.snapKey = key;
+    requestDraw(); return;
+  }
   if (pv.ptrs.size === 1) {
     let x = clamp(s.tf.x + (pt.x - s.x) / cv.width, -0.5, 1.5), y = clamp(s.tf.y + (pt.y - s.y) / cv.height, -0.5, 1.5);
     gd = { x: near(x, .5, .018), y: near(y, .5, .018) }; if (gd.x) x = .5; if (gd.y) y = .5;
@@ -1169,7 +1371,7 @@ cv.addEventListener('pointermove', ev => {
   }
   requestDraw();
 });
-function pvEnd(ev) { pv.ptrs.delete(ev.pointerId); if (pv.ptrs.size === 0) { if (pv.it && pv.start && pv.start.moved) commit(); pv.it = null; pvGuides = null; pv.snapKey = ''; requestDraw(); } }
+function pvEnd(ev) { pv.ptrs.delete(ev.pointerId); if (pv.ptrs.size === 0) { if (pv.it && pv.start && pv.start.moved) commit(); pv.it = null; pv.handle = null; pvGuides = null; pv.snapKey = ''; requestDraw(); } }
 cv.addEventListener('pointerup', pvEnd); cv.addEventListener('pointercancel', pvEnd);
 function inBox(b, x, y) { const a = -b.rot * Math.PI / 180, dx = x - b.x, dy = y - b.y, lx = dx * Math.cos(a) - dy * Math.sin(a), ly = dx * Math.sin(a) + dy * Math.cos(a); return Math.abs(lx) <= b.w / 2 + 12 && Math.abs(ly) <= b.h / 2 + 12; }
 
@@ -1915,17 +2117,17 @@ function transformSheet(it) {
   const render = r => {
     const local = L(), tf = ov ? ovTf(it, local) : tfAt(it, local), n = (it.kf || []).length, atKf = (it.kf || []).some(k => Math.abs(k.t - local) < .05);
     r.innerHTML = `<div class="viz-row"><figure class="viz demo"><canvas id="tfMap" style="height:110px"></canvas><figcaption>In the frame</figcaption></figure>${vizBox('tfG', 110)}</div><div class="legend" id="tfLeg"></div>` +
-      slider('tx', 'Position X', -0.5, 1.5, .005, tf.x, v => Math.round(v * 100)) + slider('ty', 'Position Y', -0.5, 1.5, .005, tf.y, v => Math.round(v * 100)) + slider('ts', 'Scale', .1, 5, .01, tf.s, v => Math.round(v * 100) + '%') + slider('tr', 'Rotation', -180, 180, 1, tf.r, v => Math.round(v) + '°') + slider('to', 'Opacity', 0, 1, .01, tf.o, pct) +
+      slider('tx', 'Position X', -0.5, 1.5, .005, tf.x, v => Math.round(v * 100)) + slider('ty', 'Position Y', -0.5, 1.5, .005, tf.y, v => Math.round(v * 100)) + slider('ts', 'Scale', .1, 5, .01, tf.s, v => Math.round(v * 100) + '%') + slider('tw', 'Width', .1, 5, .01, tf.w || 1, v => Math.round(v * 100) + '%') + slider('th', 'Height', .1, 5, .01, tf.h || 1, v => Math.round(v * 100) + '%') + slider('tr', 'Rotation', -180, 180, 1, tf.r, v => Math.round(v) + '°') + slider('to', 'Opacity', 0, 1, .01, tf.o, pct) +
       `<div class="kfbar"><button type="button" class="btn ${atKf ? '' : 'main'}" id="kfAdd">${atKf ? 'Keyframe here' : 'Add keyframe'}</button>${atKf ? '<button type="button" class="btn danger" id="kfDel">Delete keyframe</button>' : ''}${n ? '<button type="button" class="btn" id="kfClr">Clear all</button>' : ''}<button type="button" class="btn" id="tfR">Reset</button></div>
-      <p class="note">${n ? `${n} keyframe${n > 1 ? 's' : ''}. Move the playhead, change a value and a keyframe is added there. Movement between keyframes is smooth.` : 'Add a keyframe, move the playhead, then change position, scale or rotation to animate. You can also drag and pinch on the preview.'}</p>`;
+      <p class="note">${n ? `${n} keyframe${n > 1 ? 's' : ''}. Move the playhead, change a value and a keyframe is added there. Movement between keyframes is smooth.` : 'Add a keyframe, move the playhead, then change position, size or rotation to animate. On the preview, drag the item to move it, drag a corner to resize, a side handle to stretch its width or height, and the round knob to rotate.'}</p>`;
     const viz = () => tfViz(r, it, ov); viz();
     const st = k => v => { setTf(it, { [k]: v }, L(), ov); viz(); };
     bindSlider(r, 'tx', v => Math.round(v * 100), st('x')); bindSlider(r, 'ty', v => Math.round(v * 100), st('y'));
-    bindSlider(r, 'ts', v => Math.round(v * 100) + '%', st('s')); bindSlider(r, 'tr', v => Math.round(v) + '°', st('r')); bindSlider(r, 'to', pct, st('o'));
+    bindSlider(r, 'ts', v => Math.round(v * 100) + '%', st('s')); bindSlider(r, 'tw', v => Math.round(v * 100) + '%', st('w')); bindSlider(r, 'th', v => Math.round(v * 100) + '%', st('h')); bindSlider(r, 'tr', v => Math.round(v) + '°', st('r')); bindSlider(r, 'to', pct, st('o'));
     $('#kfAdd', r).onclick = () => { const l = L(), cur = ov ? ovTf(it, l) : tfAt(it, l); it.kf = it.kf || []; if (!it.kf.some(k => Math.abs(k.t - l) < .05)) { const k = { t: +l.toFixed(3) }; TFK.forEach(q => k[q] = cur[q]); it.kf.push(k); it.kf.sort((a, b) => a.t - b.t); } commit(); render(r); };
     const d = $('#kfDel', r); if (d) d.onclick = () => { const l = L(); it.kf = it.kf.filter(k => Math.abs(k.t - l) >= .05); commit(); render(r); };
     const c2 = $('#kfClr', r); if (c2) c2.onclick = () => { it.kf = []; commit(); render(r); };
-    $('#tfR', r).onclick = () => { it.kf = []; if (ov) { it.x = .5; it.y = .5; it.scale = 1; it.rot = 0; it.opacity = 1; } else it.tf = DEF_TF(sel.type === 'layer' ? .55 : 1); commit(); render(r); };
+    $('#tfR', r).onclick = () => { it.kf = []; if (ov) { it.x = .5; it.y = .5; it.scale = 1; it.rot = 0; it.opacity = 1; it.sw = 1; it.sh = 1; } else it.tf = DEF_TF(sel.type === 'layer' ? .55 : 1); commit(); render(r); };
   };
   openSheet('Transform & keyframes', '', render);
 }

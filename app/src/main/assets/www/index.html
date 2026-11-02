@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="theme-color" content="#111111">
 <title>SplashCut</title>
-<link rel="stylesheet" href="style.css?v=4">
+<link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
 <div id="app">
@@ -54,7 +54,7 @@
         <button type="button" class="play" id="playBtn" aria-label="Play"></button>
         <button type="button" class="ibtn sm" id="stepFwd" aria-label="Next frame"><svg class="i" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
       </div>
-      <div class="zoom"><button type="button" class="ibtn sm" id="zoomOut" aria-label="Zoom out timeline">−</button><button type="button" class="ibtn sm" id="zoomIn" aria-label="Zoom in timeline">+</button></div>
+      <div class="zoom"><button type="button" class="ibtn sm" id="zoomOut" aria-label="Zoom out timeline">−</button><span class="zoom-lvl" id="zoomLvl" aria-live="polite">100%</span><button type="button" class="ibtn sm" id="zoomIn" aria-label="Zoom in timeline">+</button></div>
     </div>
 
     <div class="tl-wrap">
@@ -98,6 +98,6 @@
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <input type="file" id="fileIn" hidden>
 </div>
-<script src="app.js?v=4"></script>
+<script src="app.js?v=5"></script>
 </body>
 </html>
