@@ -267,7 +267,7 @@ public class MainActivity extends Activity {
                             done = pfd != null && remux(s.tmp, new MediaMuxer(pfd.getFileDescriptor(), webm ? MediaMuxer.OutputFormat.MUXER_OUTPUT_WEBM : MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4));
                         } catch (Exception ignored) { }
                     }
-                    if (!done) try (OutputStream o = getContentResolver().openOutputStream(uri, "wt")) { copy(s.tmp, o); }
+                    if (!done) try (OutputStream o = getContentResolver().openOutputStream(uri, "wt")) { copyFile(s.tmp, o); }
                     ContentValues fin = new ContentValues();
                     fin.put(MediaStore.MediaColumns.IS_PENDING, 0);
                     getContentResolver().update(uri, fin, null, null);
@@ -281,7 +281,7 @@ public class MainActivity extends Activity {
                     try { done = remux(s.tmp, new MediaMuxer(file.getAbsolutePath(), webm ? MediaMuxer.OutputFormat.MUXER_OUTPUT_WEBM : MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)); }
                     catch (Exception ignored) { }
                 }
-                if (!done) try (OutputStream o = new FileOutputStream(file)) { copy(s.tmp, o); }
+                if (!done) try (OutputStream o = new FileOutputStream(file)) { copyFile(s.tmp, o); }
                 MediaScannerConnection.scanFile(MainActivity.this, new String[]{file.getAbsolutePath()}, new String[]{s.mime}, null);
                 return "file:" + file.getAbsolutePath();
             } catch (Exception e) {
@@ -399,7 +399,7 @@ public class MainActivity extends Activity {
         }
     }
 
-    private static void copy(File src, OutputStream o) throws java.io.IOException {
+    private static void copyFile(File src, OutputStream o) throws java.io.IOException {
         try (InputStream in = new FileInputStream(src)) {
             byte[] b = new byte[1 << 16];
             int r;
