@@ -8,13 +8,19 @@ import android.content.ContentValues;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
+import android.media.MediaCodec;
+import android.media.MediaExtractor;
+import android.media.MediaFormat;
+import android.media.MediaMuxer;
 import android.media.MediaScannerConnection;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.ParcelFileDescriptor;
 import android.provider.MediaStore;
 import android.util.Base64;
+import android.view.HapticFeedbackConstants;
 import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
@@ -30,8 +36,11 @@ import androidx.webkit.WebViewAssetLoader;
 
 import java.io.BufferedOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -49,7 +58,8 @@ public class MainActivity extends Activity {
     private PermissionRequest pendingPermission;
     private final Map<String, Save> saves = new HashMap<>();
 
-    private static class Save { Uri uri; File file; OutputStream out; String mime; boolean image; }
+    /** An export in progress: the recording is buffered in a temp file, then finished into the gallery by endSave. */
+    private static class Save { String name; File tmp; OutputStream out; String mime; boolean image; }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -193,7 +203,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
-        for (Save s : saves.values()) { try { s.out.close(); } catch (Exception ignored) { } }
+        for (Save s : saves.values()) { try { s.out.close(); } catch (Exception ignored) { } s.tmp.delete(); }
         saves.clear();
         web.destroy();
         super.onDestroy();
@@ -205,24 +215,12 @@ public class MainActivity extends Activity {
         public String beginSave(String name, String mime) {
             try {
                 Save s = new Save();
+                s.name = name;
                 s.mime = (mime == null || mime.isEmpty()) ? "video/mp4" : mime.split(";")[0];
                 s.image = s.mime.startsWith("image/");
-                if (Build.VERSION.SDK_INT >= 29) {
-                    ContentValues cv = new ContentValues();
-                    cv.put(MediaStore.MediaColumns.DISPLAY_NAME, name);
-                    cv.put(MediaStore.MediaColumns.MIME_TYPE, s.mime);
-                    cv.put(MediaStore.MediaColumns.RELATIVE_PATH, (s.image ? Environment.DIRECTORY_PICTURES : Environment.DIRECTORY_MOVIES) + "/SplashCut");
-                    cv.put(MediaStore.MediaColumns.IS_PENDING, 1);
-                    s.uri = getContentResolver().insert(s.image ? MediaStore.Images.Media.EXTERNAL_CONTENT_URI : MediaStore.Video.Media.EXTERNAL_CONTENT_URI, cv);
-                    if (s.uri == null) return "";
-                    s.out = new BufferedOutputStream(getContentResolver().openOutputStream(s.uri), 1 << 16);
-                } else {
-                    String dirType = s.image ? Environment.DIRECTORY_PICTURES : Environment.DIRECTORY_MOVIES;
-                    File dir = new File(Environment.getExternalStoragePublicDirectory(dirType), "SplashCut");
-                    if (!dir.exists() && !dir.mkdirs()) dir = getExternalFilesDir(dirType);
-                    s.file = new File(dir, name);
-                    s.out = new BufferedOutputStream(new FileOutputStream(s.file), 1 << 16);
-                }
+                // Buffer to a private temp file first. Nothing appears in the gallery until endSave has a playable file.
+                s.tmp = File.createTempFile("export", ".part", getCacheDir());
+                s.out = new BufferedOutputStream(new FileOutputStream(s.tmp), 1 << 16);
                 String id = UUID.randomUUID().toString();
                 saves.put(id, s);
                 return id;
@@ -247,20 +245,73 @@ public class MainActivity extends Activity {
         public String endSave(String id) {
             Save s = saves.remove(id);
             if (s == null) return "";
+            Uri uri = null;
             try {
                 s.out.flush();
                 s.out.close();
-                if (s.uri != null) {
+                if (s.tmp.length() == 0) return "";
+                boolean webm = s.mime.contains("webm");
+                String dirType = s.image ? Environment.DIRECTORY_PICTURES : Environment.DIRECTORY_MOVIES;
+                if (Build.VERSION.SDK_INT >= 29) {
                     ContentValues cv = new ContentValues();
-                    cv.put(MediaStore.MediaColumns.IS_PENDING, 0);
-                    getContentResolver().update(s.uri, cv, null, null);
-                    return s.uri.toString();
+                    cv.put(MediaStore.MediaColumns.DISPLAY_NAME, s.name);
+                    cv.put(MediaStore.MediaColumns.MIME_TYPE, s.mime);
+                    cv.put(MediaStore.MediaColumns.RELATIVE_PATH, dirType + "/SplashCut");
+                    cv.put(MediaStore.MediaColumns.DATE_TAKEN, System.currentTimeMillis());
+                    cv.put(MediaStore.MediaColumns.IS_PENDING, 1);
+                    uri = getContentResolver().insert(s.image ? MediaStore.Images.Media.EXTERNAL_CONTENT_URI : MediaStore.Video.Media.EXTERNAL_CONTENT_URI, cv);
+                    if (uri == null) return "";
+                    boolean done = false;
+                    if (!s.image) {
+                        try (ParcelFileDescriptor pfd = getContentResolver().openFileDescriptor(uri, "rw")) {
+                            done = pfd != null && remux(s.tmp, new MediaMuxer(pfd.getFileDescriptor(), webm ? MediaMuxer.OutputFormat.MUXER_OUTPUT_WEBM : MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4));
+                        } catch (Exception ignored) { }
+                    }
+                    if (!done) try (OutputStream o = getContentResolver().openOutputStream(uri, "wt")) { copy(s.tmp, o); }
+                    ContentValues fin = new ContentValues();
+                    fin.put(MediaStore.MediaColumns.IS_PENDING, 0);
+                    getContentResolver().update(uri, fin, null, null);
+                    return uri.toString();
                 }
-                MediaScannerConnection.scanFile(MainActivity.this, new String[]{s.file.getAbsolutePath()}, new String[]{s.mime}, null);
-                return "file:" + s.file.getAbsolutePath();
+                File dir = new File(Environment.getExternalStoragePublicDirectory(dirType), "SplashCut");
+                if (!dir.exists() && !dir.mkdirs()) dir = getExternalFilesDir(dirType);
+                File file = new File(dir, s.name);
+                boolean done = false;
+                if (!s.image) {
+                    try { done = remux(s.tmp, new MediaMuxer(file.getAbsolutePath(), webm ? MediaMuxer.OutputFormat.MUXER_OUTPUT_WEBM : MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)); }
+                    catch (Exception ignored) { }
+                }
+                if (!done) try (OutputStream o = new FileOutputStream(file)) { copy(s.tmp, o); }
+                MediaScannerConnection.scanFile(MainActivity.this, new String[]{file.getAbsolutePath()}, new String[]{s.mime}, null);
+                return "file:" + file.getAbsolutePath();
             } catch (Exception e) {
+                if (uri != null) try { getContentResolver().delete(uri, null, null); } catch (Exception ignored) { }
                 return "";
+            } finally {
+                //noinspection ResultOfMethodCallIgnored
+                s.tmp.delete();
             }
+        }
+
+        /** Light tap of the vibration motor, used when items snap into place. */
+        @JavascriptInterface
+        public void haptic(String kind) {
+            runOnUiThread(() -> web.performHapticFeedback("apply".equals(kind) ? HapticFeedbackConstants.VIRTUAL_KEY : HapticFeedbackConstants.CLOCK_TICK,
+                    HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING));
+        }
+
+        /** Opens a saved export in the phone's video player or photo viewer. */
+        @JavascriptInterface
+        public void open(String uri, String mime) {
+            runOnUiThread(() -> {
+                if (uri == null || uri.isEmpty()) return;
+                if (uri.startsWith("file:")) {
+                    MediaScannerConnection.scanFile(MainActivity.this, new String[]{uri.substring(5)}, new String[]{mime},
+                            (path, contentUri) -> runOnUiThread(() -> { if (contentUri != null) startView(contentUri, mime); }));
+                } else {
+                    startView(Uri.parse(uri), mime);
+                }
+            });
         }
 
         @JavascriptInterface
@@ -295,6 +346,72 @@ public class MainActivity extends Activity {
                 }
             });
         }
+    }
+
+    /**
+     * The WebView records in streaming form (fragmented MP4 or WebM without a length), which many gallery
+     * apps cannot index, so the export would look missing. This rewrites it into a normal, seekable file.
+     */
+    private static boolean remux(File src, MediaMuxer mux) {
+        MediaExtractor ex = new MediaExtractor();
+        boolean started = false;
+        try {
+            ex.setDataSource(src.getAbsolutePath());
+            int n = ex.getTrackCount();
+            int[] map = new int[n];
+            int maxIn = 1 << 20;
+            for (int i = 0; i < n; i++) {
+                MediaFormat f = ex.getTrackFormat(i);
+                String m = f.getString(MediaFormat.KEY_MIME);
+                map[i] = -1;
+                if (m == null || !(m.startsWith("video/") || m.startsWith("audio/"))) continue;
+                ex.selectTrack(i);
+                map[i] = mux.addTrack(f);
+                if (f.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)) maxIn = Math.max(maxIn, f.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE));
+            }
+            mux.start();
+            started = true;
+            ByteBuffer buf = ByteBuffer.allocate(Math.max(maxIn, 8 << 20));
+            MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
+            long[] last = new long[n];
+            Arrays.fill(last, -1);
+            int samples = 0;
+            while (true) {
+                int ti = ex.getSampleTrackIndex();
+                if (ti < 0) break;
+                int size = ex.readSampleData(buf, 0);
+                if (size < 0) break;
+                long pts = Math.max(0, ex.getSampleTime());
+                if (pts <= last[ti]) pts = last[ti] + 1; // the muxer needs rising timestamps per track
+                last[ti] = pts;
+                info.set(0, size, pts, (ex.getSampleFlags() & MediaExtractor.SAMPLE_FLAG_SYNC) != 0 ? MediaCodec.BUFFER_FLAG_KEY_FRAME : 0);
+                if (map[ti] >= 0) { mux.writeSampleData(map[ti], buf, info); samples++; }
+                ex.advance();
+            }
+            mux.stop();
+            return samples > 0;
+        } catch (Exception e) {
+            return false;
+        } finally {
+            if (!started) try { mux.stop(); } catch (Exception ignored) { }
+            try { mux.release(); } catch (Exception ignored) { }
+            ex.release();
+        }
+    }
+
+    private static void copy(File src, OutputStream o) throws java.io.IOException {
+        try (InputStream in = new FileInputStream(src)) {
+            byte[] b = new byte[1 << 16];
+            int r;
+            while ((r = in.read(b)) > 0) o.write(b, 0, r);
+        }
+    }
+
+    private void startView(Uri uri, String mime) {
+        Intent view = new Intent(Intent.ACTION_VIEW);
+        view.setDataAndType(uri, mime == null || mime.isEmpty() ? "video/*" : mime.split(";")[0]);
+        view.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        try { startActivity(view); } catch (Exception ignored) { }
     }
 
     private void startShare(Uri uri, String mime) {
