@@ -883,13 +883,14 @@ function drawFrame(ctx, b) {
   }
   ctx.restore();
 }
-// Which handle (if any) is under a point on the canvas. Touching near the middle always moves the item instead.
+// Which handle (if any) is under a point on the canvas. Touching the inside of the item, or nearer its middle
+// than any handle, moves the item instead.
 function handleAt(b, pt) {
   const k = pxK(), a = -b.rot * Math.PI / 180, dx = pt.x - b.x, dy = pt.y - b.y, lx = dx * Math.cos(a) - dy * Math.sin(a), ly = dx * Math.sin(a) + dy * Math.cos(a);
-  if (Math.hypot(lx, ly) < 14 * k || (Math.abs(lx) < b.w / 2 - 14 * k && Math.abs(ly) < b.h / 2 - 14 * k)) return null;
+  if (Math.abs(lx) < b.w / 2 - 14 * k && Math.abs(ly) < b.h / 2 - 14 * k) return null;
   let best = null, bd = 24 * k;
   for (const [n, x, y] of handlePts(b, k)) { const d = Math.hypot(lx - x, ly - y); if (d < bd) { bd = d; best = n; } }
-  return best;
+  return best && Math.hypot(lx, ly) >= bd ? best : null;
 }
 // Centre lines shown on the preview while an item is dragged onto the middle of the frame.
 let pvGuides = null;
@@ -1294,6 +1295,8 @@ cv.addEventListener('pointerdown', ev => {
   const pt = canvasPt(ev); pv.ptrs.set(ev.pointerId, pt); try { cv.setPointerCapture(ev.pointerId); } catch (e) { /* pointer already gone */ }
   if (pv.ptrs.size === 1) {
     pv.handle = null;
+    // Make sure the selected item's frame is measured before testing its handles.
+    if (sel && sel.type !== 'au') { const s0 = findSel(); if (s0 && !s0._frame) draw(); }
     const fb = frameBox(), hn = fb && handleAt(fb.box, pt);
     if (hn) {
       pv.it = fb.it; pv.kind = sel.type; pv.handle = hn;
@@ -1303,7 +1306,9 @@ cv.addEventListener('pointerdown', ev => {
     }
     let hit = null, kind = null;
     const ov = [...P.overlays].reverse().find(o => o._box && inBox(o._box, pt.x, pt.y));
-    if (ov) { hit = ov; kind = 'ov'; }
+    // Inside the selected item's frame always grabs it, even while an animation has it small or hidden.
+    if (fb && inBox(fb.box, pt.x, pt.y)) { hit = fb.it; kind = sel.type; }
+    else if (ov) { hit = ov; kind = 'ov'; }
     else {
       const ly = [...P.layers].reverse().find(l => T >= l._start && T < l._start + clipLen(l) && l._box && inBox(l._box, pt.x, pt.y));
       if (ly) { hit = ly; kind = 'layer'; }
