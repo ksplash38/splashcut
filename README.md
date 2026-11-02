@@ -11,6 +11,16 @@ A mobile video editor for Android with built-in AI tools, and the kaybiz.in webs
 
 **New editing tools in v3:** sound effects, split-screen layouts, copy and paste style, replace clip, beauty smoothing, Ken Burns and slow zoom animations, loudness levelling, mute all clips, frame-by-frame stepping, snapping on the timeline, background colours, 21:9 format and 4K export.
 
+**New in v3.1:**
+- **Export fix:** exports are rewritten into a standard MP4 before they go to Movies/SplashCut, so every gallery and file app shows them. Empty recordings are reported instead of "Saved", and an **Open** button plays the saved video.
+- **Magnetic timeline:** moving or trimming an item snaps it to the playhead, other items' edges and the end of the video, with a light vibration and a gold magnet line. On the preview, items snap to the centre, upright angles and 100% size.
+- **Apply or cancel:** tool sheets preview the change live; ✓ Apply keeps it, ✕ (or tapping outside) puts it back. **Apply to all** copies speed, volume, fades, filters, adjustments, effects, animations, transitions, voice effects, relight, crop and masks to every item of the same kind.
+- **Trim tool:** drag the left or right edge over a filmstrip (or waveform), or cut left/right of the playhead, for clips, overlays, audio and text.
+- **Speed for part of a clip:** choose Entire clip or Part of clip, drag the handles to pick the part, and only that part changes speed.
+- **Visual guides:** live graphs and demos for speed and speed curves, fades, volume (dB meter), tone curve, equalizer, animations (opacity/size/position/rotation/blur over time), transitions (A → B demo), and transform keyframes with a frame map.
+- **More animations and transitions:** Rise, Drop, Pop, Twist, Zoom blur, Whip, Flicker; loops Breathe, Jitter, Orbit, Pendulum, Hop; text Drop in, Swing in, Neon flicker, Stretch; transitions Zoom out, Whip pan, Push up, Blinds, Pixelate, Shake.
+- **AI edit:** picks Energetic, Cinematic or Chill, cuts the best moments on the beat, composes matching music on the phone (or uses your song), and adds an animated title, subtitle, end card, transitions, a colour grade and whoosh sound effects.
+
 ## Install on your phone
 
 1. On your Android phone, open the latest release:
