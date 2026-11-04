@@ -1,6 +1,6 @@
 # SplashCut
 
-A mobile video editor for Android with built-in AI tools, and the kaybiz.in website that handles accounts and Pro subscriptions.
+A mobile video editor for Android with built-in smart tools, and the kaybiz.in website that handles accounts and Pro subscriptions.
 
 ## Accounts and Pro (v3)
 
@@ -19,7 +19,7 @@ A mobile video editor for Android with built-in AI tools, and the kaybiz.in webs
 - **Speed for part of a clip:** choose Entire clip or Part of clip, drag the handles to pick the part, and only that part changes speed.
 - **Visual guides:** live graphs and demos for speed and speed curves, fades, volume (dB meter), tone curve, equalizer, animations (opacity/size/position/rotation/blur over time), transitions (A → B demo), and transform keyframes with a frame map.
 - **More animations and transitions:** Rise, Drop, Pop, Twist, Zoom blur, Whip, Flicker; loops Breathe, Jitter, Orbit, Pendulum, Hop; text Drop in, Swing in, Neon flicker, Stretch; transitions Zoom out, Whip pan, Push up, Blinds, Pixelate, Shake.
-- **AI edit:** picks Energetic, Cinematic or Chill, cuts the best moments on the beat, composes matching music on the phone (or uses your song), and adds an animated title, subtitle, end card, transitions, a colour grade and whoosh sound effects.
+- **Auto edit:** picks Energetic, Cinematic or Chill, cuts the best moments on the beat, composes matching music on the phone (or uses your song), and adds an animated title, subtitle, end card, transitions, a colour grade and whoosh sound effects.
 
 ## Install on your phone
 
@@ -48,10 +48,10 @@ New builds install over the old one and keep your projects.
 
 **Audio:** music, voiceover recording, extract audio from video, volume, speed, fade in/out, 8 voice effects (echo, hall, stadium, telephone, radio, underwater, robot, megaphone) and a 3-band equalizer.
 
-**AI tools (all run on the phone):**
+**Smart tools (all run on the phone):**
 - **Auto captions** – speech recognition turns speech into timed captions in four styles.
 - **Remove background / background blur** – person detection cuts people out or blurs what is behind them.
-- **AI relight** – six lighting looks (studio, neon, sunset, golden hour…), optionally on people only.
+- **Relight** – six lighting looks (studio, neon, sunset, golden hour…), optionally on people only.
 - **Stabilize** – tracks camera movement and smooths out shake.
 - **Auto frame** – follows the subject so wide videos fit 9:16.
 - **Motion tracking** – text and stickers follow a moving object.
@@ -62,7 +62,7 @@ New builds install over the old one and keep your projects.
 
 **Export:** 720p or 1080p at 24, 30 or 60 fps in standard or high quality, saved to Movies/SplashCut with a Share button. **Snapshot** saves the current frame as a photo to Pictures/SplashCut.
 
-Captions and person detection download their AI models the first time they are used (about 40 MB and 1 MB), so they need internet once.
+Captions and person detection download their models the first time they are used (about 40 MB and 1 MB), so they need internet once.
 
 ## How it is built
 
