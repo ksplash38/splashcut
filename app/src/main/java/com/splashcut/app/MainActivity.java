@@ -8,6 +8,7 @@ import android.content.ContentValues;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
+import android.media.AudioManager;
 import android.media.MediaCodec;
 import android.media.MediaExtractor;
 import android.media.MediaFormat;
@@ -65,6 +66,7 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        setVolumeControlStream(AudioManager.STREAM_MUSIC);
         getWindow().setStatusBarColor(0xFF111111);
         getWindow().setNavigationBarColor(0xFF111111);
 
@@ -291,6 +293,18 @@ public class MainActivity extends Activity {
                 //noinspection ResultOfMethodCallIgnored
                 s.tmp.delete();
             }
+        }
+
+        /** After recording a voiceover: back to normal media sound on the loudspeaker instead of phone-call mode. */
+        @JavascriptInterface
+        @SuppressWarnings("deprecation")
+        public void audioReset() {
+            runOnUiThread(() -> {
+                AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
+                if (am == null) return;
+                am.setMode(AudioManager.MODE_NORMAL);
+                am.setSpeakerphoneOn(false);
+            });
         }
 
         /** Light tap of the vibration motor, used when items snap into place. */
