@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="theme-color" content="#111111">
 <title>SplashCut</title>
-<link rel="stylesheet" href="style.css?v=5">
+<link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
 <div id="app">
@@ -54,7 +54,7 @@
         <button type="button" class="play" id="playBtn" aria-label="Play"></button>
         <button type="button" class="ibtn sm" id="stepFwd" aria-label="Next frame"><svg class="i" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
       </div>
-      <div class="zoom"><button type="button" class="ibtn sm" id="zoomOut" aria-label="Zoom out timeline">−</button><span class="zoom-lvl" id="zoomLvl" aria-live="polite">100%</span><button type="button" class="ibtn sm" id="zoomIn" aria-label="Zoom in timeline">+</button></div>
+      <div class="zoom"><button type="button" class="ibtn sm" id="zoomOut" aria-label="Zoom out timeline">−</button><button type="button" class="ibtn sm" id="zoomIn" aria-label="Zoom in timeline">+</button></div>
     </div>
 
     <div class="tl-wrap">
@@ -65,7 +65,6 @@
           <div class="track t-ly" id="trLy"></div>
           <div class="track t-ov" id="trOv"></div>
           <div class="track t-au" id="trAu"></div>
-          <div class="snap-line" id="snapLine" hidden><span class="snap-mag"><svg viewBox="0 0 24 24"><path d="M6 3v8a6 6 0 0 0 12 0V3h-4v8a2 2 0 0 1-4 0V3z"/><path class="tip" d="M6 3h4v3H6zM14 3h4v3h-4z"/></svg></span></div>
         </div>
       </div>
       <div class="playhead" aria-hidden="true"></div>
@@ -78,7 +77,7 @@
   <!-- Bottom sheet -->
   <div class="sheet-back" id="sheetBack" hidden></div>
   <section class="sheet" id="sheet" hidden aria-modal="true" role="dialog" aria-labelledby="sheetTitle">
-    <header class="sheet-h"><button type="button" class="sh-x" id="sheetCancel" aria-label="Cancel, don't apply" hidden><svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button><h3 id="sheetTitle"></h3><button type="button" class="sh-all" id="sheetAll" hidden>Apply to all</button><button type="button" class="done" id="sheetDone">Done</button></header>
+    <header class="sheet-h"><h3 id="sheetTitle"></h3><button type="button" class="done" id="sheetDone">Done</button></header>
     <div class="sheet-b" id="sheetBody"></div>
   </section>
 
@@ -98,6 +97,6 @@
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <input type="file" id="fileIn" hidden>
 </div>
-<script src="app.js?v=5"></script>
+<script src="app.js?v=3"></script>
 </body>
 </html>
