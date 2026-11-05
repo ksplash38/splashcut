@@ -1088,7 +1088,7 @@ function viTags(c) {
 function renderTimeline() {
   if (!P) return;
   const D = duration(), pd = pad(), wpx = Math.max(1, D * pps);
-  $('#tlIn').style.width = (wpx + pd * 2) + 'px';
+  $('#tlIn').style.width = Math.max(wpx + pd * 2, dragging ? dragging.w0 : 0) + 'px';
   const step = pps >= 160 ? 0.5 : pps >= 70 ? 1 : pps >= 30 ? 2 : pps >= 14 ? 5 : 10;
   let r = '';
   for (let i = 0, s = 0; s <= D + 0.001; i++, s = i * step) { const x = pd + s * pps, maj = i % 2 === 0; r += `<i class="${maj ? 'maj' : ''}" style="left:${x}px"></i>`; if (maj) r += `<span style="left:${x}px">${s < 60 ? s.toFixed(step < 1 ? 1 : 0) + 's' : fmt(s).slice(0, -2)}</span>`; }
@@ -1099,6 +1099,8 @@ function renderTimeline() {
   const dg = dragging, lift = it => dg && dg.item === it ? ' lift' : '', dyCss = it => dg && dg.item === it && dg.moved && dg.dy ? `transform:translateY(${dg.dy}px);` : '';
   // Short items get a minimum width and slimmer (or no) trim handles so their body is easy to grab.
   const wpxOf = (len, min) => Math.max(min, len * pps - 2), small = w => w < 34 ? ' tiny2' : w < 64 ? ' tiny' : '';
+  // The picture strip starts at the source's first frame, so a left trim uncovers it instead of sliding it along.
+  const strip = (c, m) => m && m.thumb ? `background-image:url(${m.thumb});background-position:${c.kind === 'image' ? 0 : -c.in / c.speed * pps}px 0` : '';
   let h = '';
   P.clips.forEach((c, i) => {
     const m = media[c.mediaId], len = clipLen(c), isSel = sel && sel.type === 'clip' && sel.id === c.id, tags = viTags(c);
@@ -1106,7 +1108,7 @@ function renderTimeline() {
     if (dg && dg.moved && dg.k === 'clip' && dg.h === 'l' && i >= dg.idx) left += dg.shift;
     if (dg && dg.moved && dg.item === c && dg.h === 'move') left = dg.s0 + dg.dx;
     const w = wpxOf(len, 4);
-    h += `<div class="blk${isSel ? ' sel' : ''}${lift(c)}${small(w)}" data-k="clip" data-id="${c.id}" style="left:${pd + left * pps}px;width:${w}px;${dyCss(c)}${m && m.thumb ? `background-image:url(${m.thumb})` : ''}">
+    h += `<div class="blk${isSel ? ' sel' : ''}${lift(c)}${small(w)}" data-k="clip" data-id="${c.id}" style="left:${pd + left * pps}px;width:${w}px;${dyCss(c)}${strip(c, m)}">
       ${tags.length ? `<span class="tags">${tags.map(x => `<span>${x}</span>`).join('')}</span>` : ''}<span class="lbl">${fmtS(len)}</span>${kfMarks(c)}
       <span class="hdl l" data-h="l"></span><span class="hdl r" data-h="r"></span></div>`;
     if (i < P.clips.length - 1) h += `<button type="button" class="trn${c.transition !== 'none' ? ' on' : ''}" data-trn="${c.id}" style="left:${pd + (left + len) * pps}px" aria-label="Transition">${c.transition !== 'none' ? '⧓' : '|'}</button>`;
@@ -1118,13 +1120,15 @@ function renderTimeline() {
   if (!P.clips.length) h = `<div class="tl-empty">Tap + to add videos or photos</div>`;
   $('#trMain').innerHTML = h;
   const lane = (rowId, items, startOf, endOf, html) => {
-    const L = lanes(items, startOf, endOf); let s = ''; for (let l = 0; l < L.n; l++) s += `<div class="lane" data-lane="${l}"></div>`;
+    // The item being carried keeps its row until it is dropped, so nothing hops between rows under the finger.
+    const held = dg && dg.h === 'move' && items.includes(dg.item) ? dg.item : null;
+    const L = lanes(items, it => it === held ? dg.s0 : startOf(it), it => it === held ? dg.e0 : endOf(it)); let s = ''; for (let l = 0; l < L.n; l++) s += `<div class="lane" data-lane="${l}"></div>`;
     $(rowId).innerHTML = s;
     for (const it of items) $(`${rowId} .lane[data-lane="${L.map[it.id]}"]`).insertAdjacentHTML('beforeend', html(it));
   };
   lane('#trLy', P.layers, l => l.start, l => l.start + clipLen(l), l => {
     const m = media[l.mediaId], isSel = sel && sel.type === 'layer' && sel.id === l.id, tags = viTags(l), w = wpxOf(clipLen(l), 26);
-    return `<div class="blk layer${isSel ? ' sel' : ''}${lift(l)}${small(w)}" data-k="layer" data-id="${l.id}" style="left:${pd + l.start * pps}px;width:${w}px;${dyCss(l)}${m && m.thumb ? `background-image:url(${m.thumb})` : ''}"><span class="lbl">${tags.join(' ')} ${fmtS(clipLen(l))}</span>${kfMarks(l)}<span class="hdl l" data-h="l"></span><span class="hdl r" data-h="r"></span></div>`;
+    return `<div class="blk layer${isSel ? ' sel' : ''}${lift(l)}${small(w)}" data-k="layer" data-id="${l.id}" style="left:${pd + l.start * pps}px;width:${w}px;${dyCss(l)}${strip(l, m)}"><span class="lbl">${tags.join(' ')} ${fmtS(clipLen(l))}</span>${kfMarks(l)}<span class="hdl l" data-h="l"></span><span class="hdl r" data-h="r"></span></div>`;
   });
   lane('#trOv', P.overlays, o => o.start, o => o.end, o => {
     const isSel = sel && sel.type === 'ov' && sel.id === o.id, cls = o.type === 'sticker' ? 'sticker' : o.caption ? 'cap' : 'text', w = wpxOf(o.end - o.start, 26);
@@ -1151,15 +1155,16 @@ function renderTimeline() {
    Tap an item to select it. Swiping across items always scrolls the timeline; to move an item, hold it still for a
    moment until it lifts (with a buzz), then drag it (up or down to change row, main clips also reorder). The edge
    handles of a selected item trim straight away. While dragging, the timeline stays still under the finger and
-   scrolls by itself near the screen edges. */
+   scrolls by itself near the screen edges. A redraw replaces the element under the finger and Android keeps sending
+   that touch to the old element, so finger drags are followed from listeners on the touched element itself. */
 let dragging = null, hold = null, noClick = false, autoRaf = 0;
-const HOLD_MS = 450;
+const HOLD_MS = 320;
 const tlIn = $('#tlIn');
 const listOf = k => ({ clip: P.clips, layer: P.layers, ov: P.overlays, au: P.audio })[k];
 const spanOf = (k, it) => { layout(); return k === 'clip' || k === 'layer' ? [it._start, it._start + clipLen(it)] : k === 'ov' ? [it.start, it.end] : [it.start, it.start + auLen(it)]; };
 function startDrag(k, item, h, x, y) {
   const [s0, e0] = spanOf(k, item);
-  dragging = { k, h, x0: x, y0: y, cx: x, cy: y, sc0: tl.scrollLeft, orig: deep(clean(item)), item, moved: false, T0: T, s0, e0, snapAt: null, shift: 0, dx: 0, dy: 0, idx: P.clips.indexOf(item), row: null, at: null };
+  dragging = { k, h, x0: x, y0: y, cx: x, cy: y, sc0: tl.scrollLeft, st0: tl.scrollTop, w0: tlIn.offsetWidth, orig: deep(clean(item)), item, moved: false, T0: T, s0, e0, snapAt: null, shift: 0, dx: 0, dy: 0, idx: P.clips.indexOf(item), row: null, at: null };
   if (playing) pause();
 }
 function cancelHold() { if (hold) { clearTimeout(hold.t); hold = null; } }
@@ -1175,28 +1180,47 @@ tlIn.addEventListener('pointerdown', ev => {
     const hd = hold; hold = null; if (!hd || pinch.on) return;
     select({ type: k, id }); haptic('snap');
     const it2 = (listOf(k) || []).find(x => x.id === id); if (!it2) return;
+    if (k !== 'clip') pinLanes(k);
     startDrag(k, it2, 'move', hd.x, hd.y); dragging.lift = true; noClick = true; renderTimeline();
   }, HOLD_MS) };
 });
-tlIn.addEventListener('pointermove', ev => {
-  if (hold && ev.pointerId === hold.pid) { if (Math.hypot(ev.clientX - hold.x, ev.clientY - hold.y) > 8) cancelHold(); return; }
-  if (!dragging) return;
-  const d = dragging; d.cx = ev.clientX; d.cy = ev.clientY;
-  if (!d.moved && Math.hypot(d.cx - d.x0, d.cy - d.y0) > 4) { d.moved = true; noClick = true; try { tlIn.setPointerCapture(ev.pointerId); } catch (e) { /* pointer already gone */ } }
+function dragTo(x, y) {
+  const d = dragging; d.cx = x; d.cy = y;
+  if (!d.moved && Math.hypot(x - d.x0, y - d.y0) > 4) { d.moved = true; noClick = true; }
   if (d.moved) { dragStep(); autoScroll(); }
+}
+const holdSlip = (x, y) => { if (hold && Math.hypot(x - hold.x, y - hold.y) > 10) cancelHold(); };
+tlIn.addEventListener('pointermove', ev => {
+  if (hold && ev.pointerId === hold.pid) { holdSlip(ev.clientX, ev.clientY); return; }
+  if (!dragging || ev.pointerType === 'touch') return;
+  if (!dragging.moved) try { tlIn.setPointerCapture(ev.pointerId); } catch (e) { /* pointer already gone */ }
+  dragTo(ev.clientX, ev.clientY);
 });
-// Keeps the timeline from scrolling away while an item is being dragged.
-tlIn.addEventListener('touchmove', e => { if (dragging && e.touches.length === 1 && e.cancelable) e.preventDefault(); }, { passive: false });
+// Follows the finger and keeps the timeline from scrolling away while an item is being dragged.
+const fingerMove = e => {
+  if (e.touches.length !== 1) return;
+  const p = e.touches[0]; holdSlip(p.clientX, p.clientY);
+  if (!dragging) return;
+  if (e.cancelable) e.preventDefault();
+  dragTo(p.clientX, p.clientY);
+};
+const fingerEnd = e => { if (!e.touches.length) endDrag(); };
+tlIn.addEventListener('touchstart', e => {
+  const t = e.target;
+  t.addEventListener('touchmove', fingerMove, { passive: false }); t.addEventListener('touchend', fingerEnd); t.addEventListener('touchcancel', fingerEnd);
+}, { passive: true });
+// A long press must not open anything on top of the hold that lifts an item.
+tlIn.addEventListener('contextmenu', e => e.preventDefault());
 // Shows the frame at the edge being dragged without moving the timeline.
 function peek(t) { T = clamp(t, 0, duration()); syncMedia(false); requestDraw(); updTime(); }
 function dragStep() {
   const d = dragging; if (!d) return;
   const dt = (d.cx - d.x0 + tl.scrollLeft - d.sc0) / pps, o = d.orig, it = d.item;
-  d.dx = dt; d.dy = d.h === 'move' ? d.cy - d.y0 : 0;
+  d.dx = dt; d.dy = d.h === 'move' ? d.cy - d.y0 + tl.scrollTop - d.st0 : 0;
   if (d.k === 'clip' || d.k === 'layer') {
     const m = media[it.mediaId], max = m.kind === 'image' ? 3600 : m.duration, sp = it.kind === 'image' ? 1 : it.speed * (hasCurve(it) ? 1 / curveTab(it).total : 1);
     if (d.h === 'l') {
-      const st = d.k === 'layer' ? snapEdge(o.start + dt, it, d.T0) : (showSnap(null), d.s0 + dt), ds = st - d.s0;
+      const st = d.k === 'layer' ? snapEdge(o.start + dt, it, d.T0) : (showSnap(null), d.s0 + dt), ds = d.k === 'layer' ? Math.max(st, 0) - d.s0 : st - d.s0;
       if (it.kind === 'image') { it.out = clamp(o.out - ds, 0.3, 3600); if (d.k === 'layer') it.start = Math.max(0, o.start + (o.out - it.out)); }
       else { it.in = clamp(o.in + ds * sp, 0, it.out - 0.1); if (d.k === 'layer') it.start = Math.max(0, o.start + (it.in - o.in) / sp); }
       layout();
@@ -1214,7 +1238,7 @@ function dragStep() {
     peek(d.h === 'r' ? it.end - 0.01 : it.start + 0.01);
   } else {
     const m = media[it.mediaId], r = it.rate || 1;
-    if (d.h === 'l') { const nd = clamp((snapEdge(o.start + dt, it, d.T0) - o.start) * r, -o.in, (o.out - o.in) - 0.2); it.in = o.in + nd; it.start = Math.max(0, o.start + nd / r); }
+    if (d.h === 'l') { const nd = clamp((snapEdge(o.start + dt, it, d.T0) - o.start) * r, -Math.min(o.in, o.start * r), (o.out - o.in) - 0.2); it.in = o.in + nd; it.start = Math.max(0, o.start + nd / r); }
     else if (d.h === 'r') { const en = snapEdge(d.e0 + dt, it, d.T0); it.out = clamp(o.out + (en - d.e0) * r, o.in + 0.2, m.duration); }
     else { it.start = snapStart(Math.max(0, o.start + dt), auLen(it), d.T0, it); d.row = rowTarget(d); }
     peek(d.h === 'r' ? it.start + auLen(it) - 0.01 : it.start + 0.01);
@@ -1243,7 +1267,9 @@ function rowTarget(d) {
   return null;
 }
 const trackOf = k => k === 'layer' || k === 'clip' ? [P.layers, l => l.start, l => l.start + clipLen(l)] : k === 'ov' ? [P.overlays, o => o.start, o => o.end] : [P.audio, a => a.start, a => a.start + auLen(a)];
-// Pins every item of a track to the row it is shown in, then puts one item on row `lane`.
+// Pins every item of a track to the row it is shown in.
+function pinLanes(k) { const [list, so, eo] = trackOf(k), L = lanes(list, so, eo); list.forEach(x => { x.lane = L.map[x.id]; }); }
+// Pins the other items of a track, then puts one item on row `lane`.
 function setLane(k, it, lane) {
   const [list, so, eo] = trackOf(k), L = lanes(list.filter(x => x !== it), so, eo);
   list.forEach(x => { if (x !== it) x.lane = L.map[x.id]; });
@@ -1269,7 +1295,7 @@ function applyDrop(d) {
     P.clips.splice(idx, 0, it); sel = { type: 'clip', id: it.id }; toast('Moved to the main track');
     return;
   }
-  if (r.lane != null) setLane(d.k, it, r.lane);
+  if (r.lane != null) it.lane = r.lane;
 }
 function autoScroll() {
   if (autoRaf) return;
@@ -1277,9 +1303,10 @@ function autoScroll() {
     autoRaf = 0; const d = dragging; if (!d || !d.moved) return;
     const r = tl.getBoundingClientRect(), edge = 44;
     const v = d.cx < r.left + edge ? -Math.ceil((r.left + edge - d.cx) / 3) : d.cx > r.right - edge ? Math.ceil((d.cx - (r.right - edge)) / 3) : 0;
-    if (!v) return;
-    const before = tl.scrollLeft; tl.scrollLeft = before + v;
-    if (tl.scrollLeft !== before) dragStep();
+    const vy = d.h !== 'move' ? 0 : d.cy < r.top + 24 ? -4 : d.cy > r.bottom - 24 ? 4 : 0;
+    if (!v && !vy) return;
+    const before = tl.scrollLeft, beforeY = tl.scrollTop; tl.scrollLeft = before + v; tl.scrollTop = beforeY + vy;
+    if (tl.scrollLeft !== before || tl.scrollTop !== beforeY) dragStep();
     autoRaf = requestAnimationFrame(step);
   };
   autoRaf = requestAnimationFrame(step);
@@ -1321,6 +1348,8 @@ function endDrag() {
   if (!dragging) return;
   const d = dragging; dragging = null; showSnap(null); stopAuto();
   if (d.moved) {
+    const trimmed = () => d.k === 'clip' && d.h === 'l' ? $(`#trMain .blk[data-id="${d.item.id}"]`) : null, was = trimmed();
+    const x0 = was ? was.getBoundingClientRect().left : 0;
     applyDrop(d);
     // The playhead stays where the timeline shows it, not at the edge that was dragged. After a left trim on the
     // main track the clips after it move back by the trimmed time, so the view moves with them: the new left edge
@@ -1328,6 +1357,9 @@ function endDrag() {
     const keep = d.k === 'clip' && d.h === 'l' ? d.shift : 0;
     T = clamp(tl.scrollLeft / pps - keep, 0, duration()); syncMedia(false);
     commit(); renderToolbar();
+    // When the view cannot absorb the closed gap (near the start) the timeline glides there instead of jumping.
+    const now = trimmed(), jump = now ? x0 - now.getBoundingClientRect().left : 0;
+    if (Math.abs(jump) > 1 && tlIn.animate) tlIn.animate([{ transform: `translateX(${jump}px)` }, { transform: 'none' }], { duration: 180, easing: 'ease-out' });
   } else renderTimeline();
   setTimeout(() => { noClick = false; }, 60);
 }
