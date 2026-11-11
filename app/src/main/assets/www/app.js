@@ -192,6 +192,16 @@ async function loadMedia(id) {
   await probe(m, rec);
   return m;
 }
+// A 12 MP photo takes about 48 MB once opened; it is shrunk to the largest size an export can use.
+const IMG_MAX = 2048;
+function fitImage(img) {
+  const w = img.naturalWidth, h = img.naturalHeight, k = Math.min(1, IMG_MAX / Math.max(w, h, 1));
+  if (k >= 1) return img;
+  const c = C(Math.round(w * k), Math.round(h * k));
+  try { ctx2d(c).drawImage(img, 0, 0, c.width, c.height); } catch (e) { return img; }
+  img.removeAttribute('src');
+  return c;
+}
 function makeThumb(src, w, h, H = 96) {
   const c = C(Math.max(1, Math.round(H * (w || 16) / (h || 9))), H);
   try { ctx2d(c).drawImage(src, 0, 0, c.width, c.height); return c.toDataURL('image/jpeg', 0.72); } catch (e) { return null; }
@@ -213,7 +223,7 @@ function probe(m, rec) {
     setTimeout(fin, 12000);
     if (m.kind === 'image') {
       const img = new Image(); img.decoding = 'async';
-      img.onload = () => { m.img = img; m.w = img.naturalWidth; m.h = img.naturalHeight; m.duration = 3600; if (!m.thumb) m.thumb = makeThumb(img, m.w, m.h); fin(); };
+      img.onload = () => { m.img = fitImage(img); m.w = m.img.width; m.h = m.img.height; m.duration = 3600; if (!m.thumb) m.thumb = makeThumb(m.img, m.w, m.h); fin(); };
       img.onerror = fin; img.src = m.url; return;
     }
     if (m.kind === 'audio') {
@@ -256,17 +266,18 @@ async function importFiles(files) {
 // so it keeps working after the engine is rebuilt, and two tools asking at once share one decode.
 async function decodeMedia(m) {
   if (!m || m.kind === 'image') return null;
-  if (m.buf !== undefined) return m.buf;
+  if (m.buf !== undefined) { keepBuf(m); return m.buf; }
   if (!m.dec) m.dec = (async () => {
     try { const ab = await m.blob.arrayBuffer(); m.buf = await new OfflineAudioContext(2, 1, 44100).decodeAudioData(ab); }
     catch (e) { m.buf = null; }
-    m.dec = null; return m.buf;
+    m.dec = null; keepBuf(m); return m.buf;
   })();
   return m.dec;
 }
-/* Waveforms on the timeline. Big videos are decoded at a low sample rate just for the picture, which needs a small
+// A decoded song is about 85 MB for 4 minutes, so it is dropped 20 s after the last tool asked for it.
+function keepBuf(m) { clearTimeout(m.bufT); m.bufT = setTimeout(() => { if (!m.dec) m.buf = undefined; }, 20000); }
+/* Waveforms on the timeline. The sound is decoded at a low sample rate just for the picture, which needs a small
    part of the memory a full decode would. The picture is kept, so a project opens without decoding again. */
-const WAVE_FULL = 40 * 1024 * 1024;
 function drawWave(b, dur) {
   const W = Math.round(clamp((dur || b.duration) * 40, 600, 6000)), H = 60, c = C(W, H), x = ctx2d(c);
   const chs = [...Array(Math.min(2, b.numberOfChannels))].map((_, i) => b.getChannelData(i)), n = chs[0].length, step = n / W, peaks = new Float32Array(W);
@@ -290,7 +301,6 @@ function ensureWave(m) {
   const job = (async () => {
     try { const w = await getWave(m.id); if (w && w.wave) return (m.wave = w.wave); } catch (e) { /* not saved yet */ }
     let b = m.buf || null;
-    if (!b && m.blob.size <= WAVE_FULL) b = await decodeMedia(m);
     if (!b) { try { b = await new OfflineAudioContext(1, 1, 8000).decodeAudioData(await m.blob.arrayBuffer()); } catch (e) { b = null; } }
     if (!b) { m.wave = 'none'; return m.wave; }
     m.wave = drawWave(b, m.duration);
@@ -299,6 +309,18 @@ function ensureWave(m) {
   })();
   waveJobs[m.id] = job; job.finally(() => { delete waveJobs[m.id]; });
   return job;
+}
+// Picture data turned into a blob link once, so each timeline redraw does not copy and decode it again.
+const blobUrls = new Map();
+function picUrl(data) {
+  if (!data || !data.startsWith('data:')) return data;
+  let u = blobUrls.get(data); if (u) return u;
+  try {
+    const [head, body] = data.split(','), bin = atob(body), a = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i);
+    u = URL.createObjectURL(new Blob([a], { type: head.slice(5).split(';')[0] }));
+  } catch (e) { u = data; }
+  blobUrls.set(data, u); return u;
 }
 // Draws the waveform of an audio item's file, then shows it on the timeline.
 const showWave = m => ensureWave(m).then(() => renderTimeline());
@@ -463,7 +485,7 @@ function commit() {
   if (edit) { renderTimeline(); requestDraw(); return; }
   const s = JSON.stringify(clean(P));
   if (hist[hi] === s) { renderTimeline(); requestDraw(); return; }
-  hist = hist.slice(0, hi + 1); hist.push(s); if (hist.length > 60) hist.shift(); hi = hist.length - 1;
+  hist = hist.slice(0, hi + 1); hist.push(s); if (hist.length > 40) hist.shift(); hi = hist.length - 1;
   updUndo(); scheduleSave(); renderTimeline(); requestDraw();
 }
 function restore(i) {
@@ -499,19 +521,28 @@ function elFor(item, m) {
 }
 function dropEl(id) {
   const e = els[id]; if (!e) return;
-  if (!e.img) { try { e.el.pause(); e.el.removeAttribute('src'); e.el.load(); e.gain.disconnect(); if (e.nodes) e.nodes.forEach(n => { try { n.disconnect(); if (n.stop) n.stop(); } catch (_) {} }); } catch (_) {} }
+  if (!e.img) { try { e.el.pause(); e.el.removeAttribute('src'); e.el.load(); if (e.src) e.src.disconnect(); e.gain.disconnect(); if (e.nodes) e.nodes.forEach(n => { try { n.disconnect(); if (n.stop) n.stop(); } catch (_) {} }); } catch (_) {} }
   delete els[id];
 }
 function syncEls() { const ids = new Set([...vis().map(c => c.id), ...P.audio.map(a => a.id)]); for (const id of Object.keys(els)) if (!ids.has(id)) dropEl(id); }
 function setGain(e, v, tau = .02) { if (!e.gain) return; const g = e.gain.gain; if (Math.abs(g.value - v) > 0.001) g.setTargetAtTime(v, AC.currentTime, tau); }
 
 /* ================= Playback ================= */
+/* Each video player holds one of the phone's few video decoders and a lot of memory, so a project split into many
+   clips would run out. Players are made a few seconds before an item starts and let go a few seconds after. */
+const NEAR = 2.5, FAR = 4;
+function nearItem(id, t, s, e) {
+  if (t >= s - NEAR && t < e + 1) return true;
+  if (els[id] && (t < s - FAR || t > e + FAR)) dropEl(id);
+  return !!els[id];
+}
 let T = 0, playing = false, playPerf = 0, playT = 0, raf = 0, exporting = null, recording = null, offline = false;
 function syncMedia(on) {
   const t = T; layout();
   for (const c of vis()) {
     const m = media[c.mediaId]; if (!m || m.kind === 'image') continue;
-    const e = elFor(c, m), len = clipLen(c), v = e.el;
+    const len = clipLen(c); if (!nearItem(c.id, t, c._start, c._start + len)) continue;
+    const e = elFor(c, m), v = e.el;
     applyAfx(e, c.afx);
     const active = t >= c._start - 1e-6 && t < c._start + len - 1e-6;
     if (active) {
@@ -529,7 +560,8 @@ function syncMedia(on) {
   const duckOn = P.duck && P.duck.on && P.duck.env, duckNow = duckOn && P.duck.env[Math.floor(t * 10)] === '1';
   for (const a of P.audio) {
     const m = media[a.mediaId]; if (!m) continue;
-    const e = elFor(a, m), v = e.el, len = auLen(a);
+    const len = auLen(a); if (!nearItem(a.id, t, a.start, a.start + len)) continue;
+    const e = elFor(a, m), v = e.el;
     applyAfx(e, a.afx);
     const active = t >= a.start && t < a.start + len;
     if (active) {
@@ -685,7 +717,15 @@ function geom(c, s, W, H, isMain, srcT) {
   const base = (isMain && fit === 'cover') ? Math.max(W / iw, H / ih) : Math.min(W / iw, H / ih);
   return { sx, sy, sw, sh, r90, sw90, dw: iw * base, dh: ih * base, fit };
 }
-function prepFor(id) { let p = prepMap.get(id); if (!p) { const c = C(); p = { c, g: ctx2d(c) }; prepMap.set(id, p); } return p; }
+function prepFor(id) { drawnIds.add(id); let p = prepMap.get(id); if (!p) { const c = C(); p = { c, g: ctx2d(c) }; prepMap.set(id, p); } return p; }
+// Each of these canvases can be 18 MB at export size; the ones for items not drawn in this frame are freed.
+const drawnIds = new Set();
+function freeCanvases(keep) {
+  for (const map of [prepMap, accMap, maskMap]) for (const [id, p] of map) {
+    if (id.startsWith('__') || (keep && keep.has(id))) continue;
+    p.c.width = p.c.height = 0; map.delete(id);
+  }
+}
 function drawVI(tctx, c, t, W, H, isMain, noMb) {
   const s = srcOf(c); if (!s || !s.w || !s.h) return false;
   const local = t - c._start, len = clipLen(c), srcT = srcAt(c, local);
@@ -854,6 +894,7 @@ function draw() {
   const W = cv.width, H = cv.height, t = T, bgc = P.bg === 'white' ? '#fff' : /^#/.test(P.bg || '') ? P.bg : '#000';
   g.setTransform(1, 0, 0, 1, 0, 0); g.globalAlpha = 1; g.filter = 'none'; g.globalCompositeOperation = 'source-over';
   g.fillStyle = bgc; g.fillRect(0, 0, W, H);
+  drawnIds.clear();
   const c = clipAt(t);
   if (c) {
     // While a video is seeking it may have no frame; keep showing the last one instead of flashing black.
@@ -872,6 +913,7 @@ function draw() {
   drawOverlays(g, W, H, t);
   if (!exporting && !offline) { const fb = frameBox(); if (fb) drawFrame(g, fb.box); }
   if (pvGuides && !exporting && !offline) drawGuides(g, W, H, pvGuides);
+  freeCanvases(drawnIds);
 }
 const LOGO = new Path2D('M20 3c6 8 12 13 12 21a12 12 0 0 1-24 0c0-8 6-13 12-21z'), LOGO_X = new Path2D('M13 25.5l14-8M13 17.5l14 8');
 // The end card: the last frame fades out, the logo drops in, then the name and a gold line.
@@ -969,7 +1011,8 @@ function drawOverlays(ctx, W, H, t) {
   for (const o of P.overlays) {
     if (t < o.start || t >= o.end) { o._box = o._frame = null; continue; }
     const local = t - o.start, len = o.end - o.start, tf = ovTf(o, local);
-    let alpha = tf.o, sc = tf.s, dy = 0, dx = 0, rot = tf.r, text = o.text;
+    let alpha = tf.o, sc = tf.s, dy = 0, dx = 0, rot = tf.r, text = o.auto ? autoText(o, local, len) : o.text;
+    if (o.auto === 'countdown') sc *= 1 + .22 * Math.pow(1 - ((len - local) % 1 + 1) % 1, 4);
     const inP = clamp(local / 0.4, 0, 1), outP = clamp((len - local) / 0.25, 0, 1);
     switch (o.anim) {
       case 'fade': alpha *= inP; break;
@@ -979,7 +1022,7 @@ function drawOverlays(ctx, W, H, t) {
       case 'zoom': sc *= .2 + .8 * easeOut(inP); alpha *= inP; break;
       case 'spin': rot += (1 - easeOut(inP)) * 270; sc *= .3 + .7 * easeOut(inP); break;
       case 'glitch': if (local < .6 || rnd2(t * 12) > .93) { dx = (rnd2(t * 40) - .5) * W * .03; alpha *= rnd2(t * 33) > .2 ? 1 : .3; } break;
-      case 'type': if (o.type === 'text') { const n = [...o.text]; text = n.slice(0, Math.ceil(n.length * clamp(local / clamp(n.length * 0.05, 0.5, 2), 0, 1))).join(''); } break;
+      case 'type': if (o.type === 'text') { const n = [...text]; text = n.slice(0, Math.ceil(n.length * clamp(local / clamp(n.length * 0.05, 0.5, 2), 0, 1))).join(''); } break;
       case 'drop': { const e = clamp(local / .55, 0, 1); dy = e < 1 ? -(1 - e) * (1 - e) * H * .35 + Math.sin(e * Math.PI) * H * .012 : 0; alpha *= Math.min(1, e * 3); break; }
       case 'swing': rot += (1 - easeOut(inP)) * -40 * Math.cos(inP * Math.PI * 1.5); alpha *= inP; break;
       case 'flicker': if (local < .9 && rnd2(t * 26) > clamp(local / .9, 0, 1)) alpha *= .12; break;
@@ -997,7 +1040,7 @@ function drawOverlays(ctx, W, H, t) {
     const lines = String(text || ' ').split('\n'), lh = px * 1.18;
     const wMax = Math.max(...lines.map(l => ctx.measureText(l || ' ').width), px * 0.5);
     const boxW = wMax + px * 0.7, boxH = lh * lines.length + px * 0.35;
-    if (o.type === 'text' && o.box) { ctx.fillStyle = o.boxColor || (o.color === '#000000' ? 'rgba(255,255,255,.88)' : 'rgba(0,0,0,.72)'); roundRect(ctx, -boxW / 2, -boxH / 2, boxW, boxH, px * 0.25); ctx.fill(); }
+    if (o.type === 'text' && o.box) { const ga = ctx.globalAlpha; ctx.globalAlpha = ga * clamp(o.boxAlpha == null ? 1 : o.boxAlpha, 0, 1); ctx.fillStyle = o.boxColor || (o.color === '#000000' ? 'rgba(255,255,255,.88)' : 'rgba(0,0,0,.72)'); roundRect(ctx, -boxW / 2, -boxH / 2, boxW, boxH, px * 0.25); ctx.fill(); ctx.globalAlpha = ga; }
     lines.forEach((l, i) => {
       const y = (i - (lines.length - 1) / 2) * lh;
       if (o.type === 'text') {
@@ -1013,6 +1056,26 @@ function drawOverlays(ctx, W, H, t) {
     o._frame = { x: tf.x * W, y: tf.y * H, w: boxW * tf.s * tw, h: boxH * tf.s * th, rot: tf.r };
     ctx.restore();
   }
+}
+/* Auto text: the words change by themselves while the text is on screen. # in the text is replaced by the value. */
+const AUTO_TEXTS = {
+  timer: ['Stopwatch', '0:07.4', () => ({ text: '#', font: 'cond', size: 8, anim: 'none' })],
+  countdown: ['Countdown', '3', () => ({ text: '#', font: 'black', size: 16, anim: 'none', y: .5 })],
+  counter: ['Number counter', '1,000', () => ({ text: '# views', font: 'black', size: 7.5, anim: 'pop', autoTo: 1000 })],
+  clock: ['Video time', '0:12', () => ({ text: '#', font: 'cond', size: 4.5, box: true, x: .84, y: .08, anim: 'none' })],
+  date: ['Today\'s date', 'Date', () => ({ text: new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' }), font: 'serif', size: 4.8, shadow: true, stroke: false, y: .86, anim: 'fade', auto: null })]
+};
+function autoText(o, local, len) {
+  let v = '';
+  switch (o.auto) {
+    case 'timer': v = fmt(local); break;
+    case 'countdown': v = String(Math.max(1, Math.ceil(len - local - 1e-6))); break;
+    case 'counter': { const to = +o.autoTo || 0, u = easeOut(clamp(local / Math.max(.3, Math.min(len * .8, 3)), 0, 1)); v = Math.round(to * u).toLocaleString(); break; }
+    case 'clock': v = fmt(o.start + local).slice(0, -2); break;
+    default: return o.text;
+  }
+  const t = o.text || '#';
+  return t.includes('#') ? t.replace(/#/g, v) : (t.trim() ? t + ' ' : '') + v;
 }
 function roundRect(ctx, x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
 
@@ -1100,7 +1163,7 @@ function renderTimeline() {
   // Short items get a minimum width and slimmer (or no) trim handles so their body is easy to grab.
   const wpxOf = (len, min) => Math.max(min, len * pps - 2), small = w => w < 34 ? ' tiny2' : w < 64 ? ' tiny' : '';
   // The picture strip starts at the source's first frame, so a left trim uncovers it instead of sliding it along.
-  const strip = (c, m) => m && m.thumb ? `background-image:url(${m.thumb});background-position:${c.kind === 'image' ? 0 : -c.in / c.speed * pps}px 0` : '';
+  const strip = (c, m) => m && m.thumb ? `background-image:url(${picUrl(m.thumb)});background-position:${c.kind === 'image' ? 0 : -c.in / c.speed * pps}px 0` : '';
   let h = '';
   P.clips.forEach((c, i) => {
     const m = media[c.mediaId], len = clipLen(c), isSel = sel && sel.type === 'clip' && sel.id === c.id, tags = viTags(c);
@@ -1132,11 +1195,11 @@ function renderTimeline() {
   });
   lane('#trOv', P.overlays, o => o.start, o => o.end, o => {
     const isSel = sel && sel.type === 'ov' && sel.id === o.id, cls = o.type === 'sticker' ? 'sticker' : o.caption ? 'cap' : 'text', w = wpxOf(o.end - o.start, 26);
-    return `<div class="blk ${cls}${isSel ? ' sel' : ''}${lift(o)}${small(w)}" data-k="ov" data-id="${o.id}" style="left:${pd + o.start * pps}px;width:${w}px;${dyCss(o)}"><span class="lbl">${o.track ? 'TRK · ' : ''}${o.type === 'sticker' ? esc(o.text) : (o.caption ? 'CC · ' : '') + esc(o.text.replace(/\n/g, ' '))}</span>${kfMarks(o)}<span class="hdl l" data-h="l"></span><span class="hdl r" data-h="r"></span></div>`;
+    return `<div class="blk ${cls}${isSel ? ' sel' : ''}${lift(o)}${small(w)}" data-k="ov" data-id="${o.id}" style="left:${pd + o.start * pps}px;width:${w}px;${dyCss(o)}"><span class="lbl">${o.track ? 'TRK · ' : ''}${o.type === 'sticker' ? esc(o.text) : (o.caption ? 'CC · ' : o.auto && AUTO_TEXTS[o.auto] ? AUTO_TEXTS[o.auto][0] + ' · ' : '') + esc(o.text.replace(/\n/g, ' '))}</span>${kfMarks(o)}<span class="hdl l" data-h="l"></span><span class="hdl r" data-h="r"></span></div>`;
   });
   lane('#trAu', P.audio, a => a.start, a => a.start + auLen(a), a => {
     const m = media[a.mediaId], isSel = sel && sel.type === 'au' && sel.id === a.id, w = wpxOf(auLen(a), 26);
-    const wave = m && m.wave && m.wave !== 'none' ? `background-image:url(${m.wave});background-size:${m.duration / a.rate * pps}px 100%;background-position:${-a.in / a.rate * pps}px 0;` : '';
+    const wave = m && m.wave && m.wave !== 'none' ? `background-image:url(${picUrl(m.wave)});background-size:${m.duration / a.rate * pps}px 100%;background-position:${-a.in / a.rate * pps}px 0;` : '';
     if (m && !m.wave) showWaveSoon(m);
     const icon = a.kind === 'voice' ? 'Voice · ' : a.kind === 'extracted' ? 'Clip audio · ' : a.kind === 'sfx' ? 'SFX · ' : '';
     return `<div class="blk ${a.kind}${wave ? '' : ' nowave'}${isSel ? ' sel' : ''}${lift(a)}${small(w)}" data-k="au" data-id="${a.id}" style="left:${pd + a.start * pps}px;width:${w}px;${dyCss(a)}${wave}"><span class="lbl">${icon}${esc(m ? m.name : 'Audio')}${a.afx && a.afx.preset !== 'none' ? ' · ' + AFX[a.afx.preset] : ''}</span><span class="hdl l" data-h="l"></span><span class="hdl r" data-h="r"></span></div>`;
@@ -1220,7 +1283,7 @@ function dragStep() {
   if (d.k === 'clip' || d.k === 'layer') {
     const m = media[it.mediaId], max = m.kind === 'image' ? 3600 : m.duration, sp = it.kind === 'image' ? 1 : it.speed * (hasCurve(it) ? 1 / curveTab(it).total : 1);
     if (d.h === 'l') {
-      const st = d.k === 'layer' ? snapEdge(o.start + dt, it, d.T0) : (showSnap(null), d.s0 + dt), ds = d.k === 'layer' ? Math.max(st, 0) - d.s0 : st - d.s0;
+      const st = (showSnap(null), d.s0 + dt), ds = d.k === 'layer' ? Math.max(st, 0) - d.s0 : st - d.s0;
       if (it.kind === 'image') { it.out = clamp(o.out - ds, 0.3, 3600); if (d.k === 'layer') it.start = Math.max(0, o.start + (o.out - it.out)); }
       else { it.in = clamp(o.in + ds * sp, 0, it.out - 0.1); if (d.k === 'layer') it.start = Math.max(0, o.start + (it.in - o.in) / sp); }
       layout();
@@ -1232,13 +1295,13 @@ function dragStep() {
     else { d.row = rowTarget(d); d.at = d.row ? null : reorderAt(d); showSnap(d.at ? d.at.t : null); }
   } else if (d.k === 'ov') {
     const len = o.end - o.start;
-    if (d.h === 'l') it.start = clamp(snapEdge(o.start + dt, it, d.T0), 0, o.end - 0.2);
+    if (d.h === 'l') { showSnap(null); it.start = clamp(o.start + dt, 0, o.end - 0.2); }
     else if (d.h === 'r') it.end = Math.max(o.start + 0.2, snapEdge(o.end + dt, it, d.T0));
     else { it.start = snapStart(Math.max(0, o.start + dt), len, d.T0, it); it.end = it.start + len; d.row = rowTarget(d); }
     peek(d.h === 'r' ? it.end - 0.01 : it.start + 0.01);
   } else {
     const m = media[it.mediaId], r = it.rate || 1;
-    if (d.h === 'l') { const nd = clamp((snapEdge(o.start + dt, it, d.T0) - o.start) * r, -Math.min(o.in, o.start * r), (o.out - o.in) - 0.2); it.in = o.in + nd; it.start = Math.max(0, o.start + nd / r); }
+    if (d.h === 'l') { showSnap(null); const nd = clamp(dt * r, -Math.min(o.in, o.start * r), (o.out - o.in) - 0.2); it.in = o.in + nd; it.start = Math.max(0, o.start + nd / r); }
     else if (d.h === 'r') { const en = snapEdge(d.e0 + dt, it, d.T0); it.out = clamp(o.out + (en - d.e0) * r, o.in + 0.2, m.duration); }
     else { it.start = snapStart(Math.max(0, o.start + dt), auLen(it), d.T0, it); d.row = rowTarget(d); }
     peek(d.h === 'r' ? it.start + auLen(it) - 0.01 : it.start + 0.01);
@@ -2094,8 +2157,10 @@ function restoreAudio() {
 /* ---- text & stickers ---- */
 function textTemplatesSheet() {
   openSheet('Add text', `<div class="fgrid">${Object.entries(TEXT_TEMPLATES).map(([k, [n, st]]) => `<button type="button" class="fopt" data-tt="${k}"><span class="sw" style="background:${st.boxColor || '#1b2030'};color:${st.color};font-size:12px;${st.glow ? `text-shadow:0 0 8px ${st.color}` : ''}">${esc(st.text.split('\n')[0].slice(0, 7))}</span>${n}</button>`).join('')}</div>
+    <div class="lab">Auto text <span class="badge">Auto</span></div><p class="note">These change by themselves while they are on screen.</p>
+    <div class="fgrid">${Object.entries(AUTO_TEXTS).map(([k, [n, sample]]) => `<button type="button" class="fopt" data-at="${k}"><span class="sw" style="background:#1b2030;color:#fff;font-size:12px;font-variant-numeric:tabular-nums">${esc(sample)}</span>${n}</button>`).join('')}</div>
     <button type="button" class="btn main full" id="ttPlain">Plain text</button>`,
-  r => { r.addEventListener('click', e => { const b = e.target.closest('[data-tt]'); if (b) addText(TEXT_TEMPLATES[b.dataset.tt][1]); }); $('#ttPlain', r).onclick = () => addText(); });
+  r => { r.addEventListener('click', e => { const b = e.target.closest('[data-tt]'); if (b) addText(TEXT_TEMPLATES[b.dataset.tt][1]); const a = e.target.closest('[data-at]'); if (a) addText({ auto: a.dataset.at, ...AUTO_TEXTS[a.dataset.at][2]() }); }); $('#ttPlain', r).onclick = () => addText(); });
 }
 function addText(preset) {
   const o = normOv({ id: uid(), type: 'text', text: 'Your text', start: T, end: T + 3, x: 0.5, y: 0.45, size: 7, scale: 1, rot: 0, font: 'classic', color: '#ffffff', stroke: true, box: false, glow: false, shadow: false, anim: 'pop', ...(preset ? deep(preset) : {}) });
@@ -2107,7 +2172,9 @@ function textSheet(o, fresh) {
     <div class="lab">Colour</div><div class="swatches" id="txCol">${COLORS.map(c => `<button type="button" class="swatch" style="background:${c}" data-c="${c}" aria-label="${c}" aria-pressed="${c === o.color}"></button>`).join('')}</div>
     <div class="chips" id="txSty">${[['stroke', 'Outline'], ['box', 'Label box'], ['glow', 'Neon glow'], ['shadow', 'Shadow']].map(([k, n]) => `<button type="button" class="chip" data-s="${k}" aria-pressed="${!!o[k]}">${n}</button>`).join('')}</div>
     <div class="lab">Box colour</div><div class="swatches" id="txBox">${['', '#000000', '#ffffff', '#e11d2e', '#0b3d91', '#ffd23f', '#36d7ff', '#ff5a87'].map(c => `<button type="button" class="swatch" style="background:${c || 'linear-gradient(135deg,#000 50%,#fff 50%)'}" data-c="${c}" aria-label="${c || 'Auto'}" aria-pressed="${(o.boxColor || '') === c}"></button>`).join('')}</div>
-    ${slider('txSz', 'Size', 2, 20, 0.5, o.size, v => v.toFixed(1))}${slider('txSp', 'Spacing', -5, 40, 1, o.spacing || 0, v => v)}${slider('txOp', 'Opacity', 0, 1, .01, o.opacity == null ? 1 : o.opacity, pct)}
+    ${o.auto ? `<p class="note">${esc(AUTO_TEXTS[o.auto] ? AUTO_TEXTS[o.auto][0] : 'Auto text')}: # in the text is replaced by the ${o.auto === 'counter' || o.auto === 'countdown' ? 'number' : 'time'}. Make the text longer on the timeline to ${o.auto === 'countdown' ? 'count down from a higher number' : 'let it run longer'}.</p>` : ''}
+    ${o.auto === 'counter' ? `<div class="row"><label for="txTo">Count up to</label><input class="inp" id="txTo" type="number" inputmode="numeric" min="0" step="1" value="${+o.autoTo || 0}"></div>` : ''}
+    ${slider('txSz', 'Size', 2, 20, 0.5, o.size, v => v.toFixed(1))}${slider('txSp', 'Spacing', -5, 40, 1, o.spacing || 0, v => v)}${slider('txOp', 'Transparency', 0, 1, .01, 1 - (o.opacity == null ? 1 : o.opacity), pct)}${slider('txBa', 'Box transparency', 0, 1, .01, 1 - (o.boxAlpha == null ? 1 : o.boxAlpha), pct)}
     ${o.caption ? '<button type="button" class="btn full" id="txCapAll">Use this look and place on all captions</button>' : ''}
     <p class="note">Drag the ${o.caption ? 'caption' : 'text'} on the preview to move it. Use two fingers to resize and rotate.</p>`,
   r => {
@@ -2121,7 +2188,10 @@ function textSheet(o, fresh) {
     $('#txSty', r).onclick = e => { const b = e.target.closest('[data-s]'); if (!b) return; o[b.dataset.s] = !o[b.dataset.s]; b.setAttribute('aria-pressed', String(o[b.dataset.s])); commit(); };
     bindSlider(r, 'txSz', v => v.toFixed(1), v => { o.size = v; });
     bindSlider(r, 'txSp', v => v, v => { o.spacing = v; });
-    bindSlider(r, 'txOp', pct, v => { setTf(o, { o: v }, T - o.start, true); });
+    // Transparency 0% is solid, 100% is invisible.
+    bindSlider(r, 'txOp', pct, v => { setTf(o, { o: 1 - v }, T - o.start, true); });
+    bindSlider(r, 'txBa', pct, v => { o.boxAlpha = 1 - v; if (!o.box) { o.box = true; const b = $('#txSty [data-s="box"]', r); if (b) b.setAttribute('aria-pressed', 'true'); } });
+    const to = $('#txTo', r); if (to) { to.addEventListener('input', () => { o.autoTo = Math.max(0, Math.round(+to.value || 0)); requestDraw(); }); to.addEventListener('change', commit); }
     const ca = $('#txCapAll', r); if (ca) ca.onclick = () => { const n = capList().filter(x => x !== o); n.forEach(x => CAP_LOOK.forEach(k => { x[k] = o[k]; })); requestDraw(); commit(); toast(`Copied to ${n.length} other caption${n.length === 1 ? '' : 's'}`); };
   }, () => commit());
 }
@@ -2926,7 +2996,7 @@ async function autoReel(o) {
    preview, retimed on the timeline and restyled; typed ones are kept when the automatic ones are made again. */
 let asr = null, asrModel = '';
 const capList = () => P.overlays.filter(o => o.caption).sort((a, b) => a.start - b.start);
-const CAP_LOOK = ['font', 'color', 'stroke', 'box', 'boxColor', 'glow', 'shadow', 'size', 'spacing', 'x', 'y'];
+const CAP_LOOK = ['font', 'color', 'stroke', 'box', 'boxColor', 'boxAlpha', 'glow', 'shadow', 'size', 'spacing', 'x', 'y'];
 const capRow = o => `<div class="caprow" data-cid="${o.id}"><button type="button" class="cap-t" data-jump aria-label="Go to this caption">${fmt(o.start)}</button><input class="cap-in" value="${esc(o.text)}" aria-label="Caption text" enterkeyhint="done"><button type="button" class="cap-x" data-del aria-label="Delete caption">${icon('close')}</button></div>`;
 function captionsSheet() {
   const caps = capList(), ref = caps[0], auto = caps.some(o => !o.manual);
@@ -3580,6 +3650,14 @@ async function leaveEditor() {
   P = null; sel = null;
   $('#editor').hidden = true; $('#home').hidden = false; renderHome();
 }
+// Android calls this when the phone is low on memory: drop everything that is rebuilt when needed.
+window.scFree = () => {
+  for (const m of Object.values(media)) if (!m.dec) m.buf = undefined;
+  freeCanvases(null); segCache.clear();
+  if (P) { for (const id of Object.keys(els)) if (!playing && !exporting) dropEl(id); if (!playing && !exporting) { syncMedia(false); requestDraw(); } }
+  if (hist.length > 12) { const cut = hist.length - 12; hist = hist.slice(cut); hi = Math.max(0, hi - cut); if (P) updUndo(); }
+};
+if (/[?&]recovered=1/.test(location.search)) setTimeout(() => toast('SplashCut ran low on memory and restarted. Your project was saved, open it to carry on.', 6000), 800);
 $('#edBack').onclick = leaveEditor;
 $('#projName').addEventListener('change', e => { P.name = e.target.value.trim() || P.name; e.target.value = P.name; scheduleSave(); });
 $('#undo').onclick = () => { if (hi > 0) restore(hi - 1); };
