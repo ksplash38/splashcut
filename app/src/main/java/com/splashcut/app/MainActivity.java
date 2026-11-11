@@ -25,6 +25,7 @@ import android.view.HapticFeedbackConstants;
 import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
+import android.webkit.RenderProcessGoneDetail;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
@@ -72,6 +73,15 @@ public class MainActivity extends Activity {
 
         if ((getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0) WebView.setWebContentsDebuggingEnabled(true);
 
+        makeWeb(START_URL);
+
+        if (Build.VERSION.SDK_INT < 29 && checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQ_STORAGE);
+        }
+    }
+
+    /** Creates the editor page. Called again if the page is ended for lack of memory. */
+    private void makeWeb(String url) {
         web = new WebView(this);
         web.setBackgroundColor(0xFF111111);
         setContentView(web);
@@ -94,6 +104,17 @@ public class MainActivity extends Activity {
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                 return loader.shouldInterceptRequest(request.getUrl());
+            }
+
+            // When the page runs out of memory Android ends it; without this the whole app would close.
+            // A fresh page is started instead and the editor reopens on the home screen (projects are saved).
+            @Override
+            public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+                if (view != web) return true;
+                web = null;
+                view.destroy();
+                makeWeb(START_URL + "?recovered=1");
+                return true;
             }
 
             @Override
@@ -141,11 +162,14 @@ public class MainActivity extends Activity {
         });
 
         web.addJavascriptInterface(new Bridge(), "SplashNative");
-        web.loadUrl(START_URL);
+        web.loadUrl(url);
+    }
 
-        if (Build.VERSION.SDK_INT < 29 && checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQ_STORAGE);
-        }
+    /** Android asks apps to give memory back before it starts closing them; the editor drops what it can rebuild. */
+    @Override
+    public void onTrimMemory(int level) {
+        super.onTrimMemory(level);
+        if (web != null && level >= TRIM_MEMORY_RUNNING_MODERATE) web.evaluateJavascript("window.scFree && window.scFree()", null);
     }
 
     private static String[] mimeTypes(String[] accept) {
@@ -192,22 +216,23 @@ public class MainActivity extends Activity {
     @Override
     @SuppressWarnings("deprecation")
     public void onBackPressed() {
+        if (web == null) { finish(); return; }
         web.evaluateJavascript("(window.splashBack && window.splashBack()) ? '1' : '0'", v -> {
             if (!"\"1\"".equals(v)) finish();
         });
     }
 
     @Override
-    protected void onPause() { super.onPause(); web.onPause(); }
+    protected void onPause() { super.onPause(); if (web != null) web.onPause(); }
 
     @Override
-    protected void onResume() { super.onResume(); web.onResume(); }
+    protected void onResume() { super.onResume(); if (web != null) web.onResume(); }
 
     @Override
     protected void onDestroy() {
         for (Save s : saves.values()) { try { s.out.close(); } catch (Exception ignored) { } s.tmp.delete(); }
         saves.clear();
-        web.destroy();
+        if (web != null) web.destroy();
         super.onDestroy();
     }
 
