@@ -655,7 +655,7 @@ function loop() {
   else exporting.progress(T / D);
 }
 function seekTo(t) { T = clamp(t, 0, duration()); if (playing) { playT = T; playPerf = performance.now(); } syncMedia(playing); requestDraw(); updTime(); followTimeline(); }
-function updPlay() { const b = $('#playBtn'); b.innerHTML = playing ? '<svg class="i" viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>' : '<svg class="i" viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></svg>'; b.classList.toggle('on', playing); b.setAttribute('aria-label', playing ? 'Pause' : 'Play'); }
+function updPlay() { const b = $('#playBtn'); b.innerHTML = playing ? '<svg class="i" viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>' : '<svg class="i" viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></svg>'; b.classList.toggle('on', playing); b.setAttribute('aria-label', playing ? 'Pause' : 'Play'); showQuick(); }
 function updTime() { $('#timeNow').textContent = fmt(T); $('#timeTotal').textContent = '/ ' + fmt(duration()); }
 async function waitFrameReady(items, ms = 1500) {
   const t0 = performance.now();
@@ -2060,19 +2060,54 @@ async function runTool(id) {
   }
 }
 
-/* Quick bar: Split, Delete and ✕ float over the preview whenever something is selected or split, so the most used
-   actions are one tap away. ✕ hides it until the next selection. */
+/* Quick bar: Move left / right, Split, Delete, Duplicate and ✕ float over the preview whenever something is selected
+   or split, so the most used actions are one tap away. On the main track the arrows swap the clip with its
+   neighbour; anything else moves one frame per tap and keeps moving, faster and faster, while an arrow is held.
+   ✕ hides the bar until the next selection. */
 let quickOff = false;
 function showQuick() {
   const q = $('#qbar'); if (!q) return;
-  const on = !!(P && sel && !quickOff && !exporting && (sel.type === 'end' || findSel()));
-  q.hidden = !on; if (on) q.querySelector('[data-q="split"]').hidden = sel.type === 'end';
+  // Hidden while playing so it never covers the picture or captions.
+  const on = !!(P && sel && !quickOff && !exporting && !playing && !recording && (sel.type === 'end' || findSel()));
+  q.hidden = !on; if (!on) return;
+  const end = sel.type === 'end', it = findSel(), i = sel.type === 'clip' ? P.clips.indexOf(it) : -1;
+  for (const k of ['split', 'left', 'right', 'dup']) q.querySelector(`[data-q="${k}"]`).hidden = end;
+  q.querySelector('[data-q="left"]').disabled = sel.type === 'clip' ? i <= 0 : !!it && (it.start || 0) <= 0;
+  q.querySelector('[data-q="right"]').disabled = sel.type === 'clip' && i >= P.clips.length - 1;
 }
-$('#qbar').innerHTML = `<button type="button" data-q="split">${icon('split')}Split</button><button type="button" class="del" data-q="delete">${icon('delete')}Delete</button><button type="button" class="x" data-q="close" aria-label="Hide these buttons">${icon('close')}</button>`;
+// Moves the selected item one step: a main clip swaps places, anything else moves by k frames.
+function moveSel(dir, k = 1) {
+  const it = findSel(); if (!it) return;
+  if (sel.type === 'clip') {
+    const i = P.clips.indexOf(it), j = i + dir; if (j < 0 || j >= P.clips.length) return;
+    [P.clips[i], P.clips[j]] = [P.clips[j], P.clips[i]]; layout(); commit(); seekTo(it._start + .01); haptic('snap'); showQuick();
+    toast(dir < 0 ? 'Clip moved left' : 'Clip moved right', 1200); return;
+  }
+  const len = sel.type === 'ov' ? it.end - it.start : 0, s0 = Math.max(0, +((it.start || 0) + dir * k / 30).toFixed(3));
+  it.start = s0; if (sel.type === 'ov') it.end = s0 + len;
+  renderTimeline(); requestDraw(); showQuick();
+}
+$('#qbar').innerHTML = `<button type="button" class="ic" data-q="left" aria-label="Move left">${icon('left')}</button><button type="button" class="ic" data-q="right" aria-label="Move right">${icon('right')}</button><button type="button" data-q="split">${icon('split')}Split</button><button type="button" class="del" data-q="delete">${icon('delete')}Delete</button><button type="button" class="ic" data-q="dup" aria-label="Duplicate">${icon('dup')}</button><button type="button" class="x" data-q="close" aria-label="Hide these buttons">${icon('close')}</button>`;
+{
+  let hold = null;
+  const stop = () => { if (!hold) return; clearTimeout(hold.t); const moved = hold.moved; hold = null; if (moved) commit(); };
+  $('#qbar').addEventListener('pointerdown', e => {
+    const b = e.target.closest('[data-q="left"],[data-q="right"]'); if (!b || b.disabled || !sel) return;
+    e.preventDefault(); stop();
+    const dir = b.dataset.q === 'left' ? -1 : 1;
+    if (sel.type === 'clip') { moveSel(dir); return; }
+    hold = { n: 0, moved: false, t: 0 };
+    const tick = () => { if (!hold) return; moveSel(dir, hold.n > 24 ? 6 : hold.n > 8 ? 3 : 1); hold.moved = true; hold.n++; hold.t = setTimeout(tick, hold.n === 1 ? 380 : 60); };
+    tick();
+  });
+  for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) $('#qbar').addEventListener(ev, stop);
+}
 $('#qbar').addEventListener('click', e => {
-  const b = e.target.closest('[data-q]'); if (!b || !sel) return;
+  const b = e.target.closest('[data-q]'); if (!b || !sel || b.dataset.q === 'left' || b.dataset.q === 'right') return;
   if (b.dataset.q === 'close') { quickOff = true; showQuick(); return; }
-  if (b.dataset.q === 'split') openTool('split'); else openTool(sel.type === 'end' ? 'endoff' : 'delete');
+  if (b.dataset.q === 'split') openTool('split');
+  else if (b.dataset.q === 'dup') openTool('dup');
+  else openTool(sel.type === 'end' ? 'endoff' : 'delete');
 });
 
 /* ---- edit operations ---- */

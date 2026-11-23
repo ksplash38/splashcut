@@ -389,3 +389,8 @@ input[type=color]{width:44px;height:34px;border:1px solid var(--line);border-rad
 .song span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #rSongs{display:grid;gap:10px}
 #rSongs[hidden]{display:none}
+
+.qbar button.ic{padding:0 11px}
+.qbar button:disabled{opacity:.35}
+.qbar button[hidden]{display:none}
+@media (max-width:440px){.qbar{gap:4px;padding:4px;max-width:calc(100vw - 16px)}.qbar button{padding:0 10px;min-height:36px;font-size:12.5px;gap:4px}.qbar button.ic,.qbar button.x{padding:0 8px}.qbar button svg.i{width:17px;height:17px}}
