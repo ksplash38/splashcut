@@ -2060,7 +2060,7 @@ async function runTool(id) {
   }
 }
 
-/* Quick bar: Move left / right, Split, Delete, Duplicate and ✕ float over the preview whenever something is selected
+/* Quick bar: Move left / right, Split, Delete, Volume and ✕ float over the preview whenever something is selected
    or split, so the most used actions are one tap away. On the main track the arrows swap the clip with its
    neighbour; anything else moves one frame per tap and keeps moving, faster and faster, while an arrow is held.
    ✕ hides the bar until the next selection. */
@@ -2071,7 +2071,9 @@ function showQuick() {
   const on = !!(P && sel && !quickOff && !exporting && !playing && !recording && (sel.type === 'end' || findSel()));
   q.hidden = !on; if (!on) return;
   const end = sel.type === 'end', it = findSel(), i = sel.type === 'clip' ? P.clips.indexOf(it) : -1;
-  for (const k of ['split', 'left', 'right', 'dup']) q.querySelector(`[data-q="${k}"]`).hidden = end;
+  for (const k of ['split', 'left', 'right']) q.querySelector(`[data-q="${k}"]`).hidden = end;
+  // Volume is there for anything with sound: video clips, video overlays and audio.
+  q.querySelector('[data-q="vol"]').hidden = end || sel.type === 'ov' || !it || it.kind === 'image';
   q.querySelector('[data-q="left"]').disabled = sel.type === 'clip' ? i <= 0 : !!it && (it.start || 0) <= 0;
   q.querySelector('[data-q="right"]').disabled = sel.type === 'clip' && i >= P.clips.length - 1;
 }
@@ -2087,7 +2089,7 @@ function moveSel(dir, k = 1) {
   it.start = s0; if (sel.type === 'ov') it.end = s0 + len;
   renderTimeline(); requestDraw(); showQuick();
 }
-$('#qbar').innerHTML = `<button type="button" class="ic" data-q="left" aria-label="Move left">${icon('left')}</button><button type="button" class="ic" data-q="right" aria-label="Move right">${icon('right')}</button><button type="button" data-q="split">${icon('split')}Split</button><button type="button" class="del" data-q="delete">${icon('delete')}Delete</button><button type="button" class="ic" data-q="dup" aria-label="Duplicate">${icon('dup')}</button><button type="button" class="x" data-q="close" aria-label="Hide these buttons">${icon('close')}</button>`;
+$('#qbar').innerHTML = `<button type="button" class="ic" data-q="left" aria-label="Move left">${icon('left')}</button><button type="button" class="ic" data-q="right" aria-label="Move right">${icon('right')}</button><button type="button" data-q="split">${icon('split')}Split</button><button type="button" class="del" data-q="delete">${icon('delete')}Delete</button><button type="button" class="ic" data-q="vol" aria-label="Volume">${icon('volume')}</button><button type="button" class="x" data-q="close" aria-label="Hide these buttons">${icon('close')}</button>`;
 {
   let hold = null;
   const stop = () => { if (!hold) return; clearTimeout(hold.t); const moved = hold.moved; hold = null; if (moved) commit(); };
@@ -2106,7 +2108,7 @@ $('#qbar').addEventListener('click', e => {
   const b = e.target.closest('[data-q]'); if (!b || !sel || b.dataset.q === 'left' || b.dataset.q === 'right') return;
   if (b.dataset.q === 'close') { quickOff = true; showQuick(); return; }
   if (b.dataset.q === 'split') openTool('split');
-  else if (b.dataset.q === 'dup') openTool('dup');
+  else if (b.dataset.q === 'vol') openTool(sel.type === 'au' ? 'avolume' : 'volume');
   else openTool(sel.type === 'end' ? 'endoff' : 'delete');
 });
 
