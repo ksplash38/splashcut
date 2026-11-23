@@ -43,6 +43,37 @@ const CURVES = { none: ['None', null], montage: ['Montage', [2, 2, .35, .35, 2, 
 const FX = { vhs: 'VHS', rgb: 'RGB split', grain: 'Film grain', vignette: 'Vignette', glow: 'Glow', shake: 'Camera shake', pulse: 'Beat pulse', strobe: 'Beat strobe',
   mirror: 'Mirror', kaleido: 'Kaleidoscope', pixelate: 'Pixelate', letterbox: 'Cinema bars', lightleak: 'Light leak', oldfilm: 'Old film', negative: 'Negative',
   heat: 'Heat vision', duotone: 'Duotone', hue: 'Colour cycle', blur: 'Soft blur', motionblur: 'Motion blur', beauty: 'Beauty smooth' };
+/* More effects, drawn on the finished frame (W × H) in the work canvas. k is the strength from 0 to 1. */
+const fxFilter = (f, k) => { copyTo(fxC, xg, workC, f); wg.globalAlpha = clamp(k, 0, 1); wg.drawImage(fxC, 0, 0); wg.globalAlpha = 1; };
+const fxTint = (fill, op, a, W, H) => { wg.save(); wg.globalCompositeOperation = op; wg.globalAlpha = clamp(a, 0, 1); wg.fillStyle = fill; wg.fillRect(0, 0, W, H); wg.restore(); };
+const fxAtopFill = (a, col, paint) => { wg.save(); wg.globalCompositeOperation = 'source-atop'; wg.globalAlpha = clamp(a, 0, 1); wg.fillStyle = col; paint(); wg.restore(); };
+const FX_X = {
+  noir: ['Noir', k => fxFilter(`grayscale(1) contrast(${(1 + .6 * k).toFixed(2)}) brightness(.92)`, Math.min(1, k * 1.4))],
+  vintage: ['Vintage', (k, W, H) => { fxFilter('sepia(.6) contrast(1.08) saturate(.8) brightness(1.05)', k); fxTint('#ff9a3c', 'soft-light', k * .5, W, H); }],
+  infrared: ['Infrared', k => fxFilter('hue-rotate(-100deg) saturate(2.3) contrast(1.15) brightness(1.05)', k)],
+  cyber: ['Cyberpunk', (k, W, H) => { fxFilter('contrast(1.2) saturate(1.35)', k); const g = wg.createLinearGradient(0, 0, W, H); g.addColorStop(0, '#00e5ff'); g.addColorStop(1, '#ff00c8'); fxTint(g, 'overlay', k * .55, W, H); }],
+  dreamy: ['Dreamy', (k, W) => { copyTo(fxC, xg, workC, `blur(${Math.max(1, Math.round(W / 70))}px) brightness(1.15) saturate(1.1)`); wg.globalCompositeOperation = 'screen'; wg.globalAlpha = .55 * k; wg.drawImage(fxC, 0, 0); wg.globalAlpha = 1; wg.globalCompositeOperation = 'source-over'; }],
+  bloom: ['Bloom', (k, W) => { copyTo(fxC, xg, workC, `brightness(1.6) contrast(1.4) blur(${Math.max(1, Math.round(W / 40))}px)`); wg.globalCompositeOperation = 'lighter'; wg.globalAlpha = .45 * k; wg.drawImage(fxC, 0, 0); wg.globalAlpha = 1; wg.globalCompositeOperation = 'source-over'; }],
+  scanlines: ['Scan lines', (k, W, H) => { const st = Math.max(2, Math.round(H / 200)); fxAtopFill(k * .45, '#000', () => { for (let y = 0; y < H; y += st) wg.fillRect(0, y, W, Math.max(1, st / 2)); }); }],
+  cctv: ['CCTV', (k, W, H, t) => {
+    fxFilter('grayscale(1) contrast(1.35) brightness(1.1)', k); fxTint('#3dff7a', 'multiply', k * .5, W, H);
+    const st = Math.max(2, Math.round(H / 160)); fxAtopFill(k * .3, '#000', () => { for (let y = 0; y < H; y += st) wg.fillRect(0, y, W, Math.max(1, st / 2)); });
+    if (k > .3) { const px = Math.round(H * .035); wg.font = `700 ${px}px "Roboto Mono",monospace`; wg.textBaseline = 'top'; wg.textAlign = 'left'; wg.fillStyle = `rgba(255,255,255,${k})`; wg.fillText(`CAM 01  ${fmt(t)}`, px, px); if (Math.floor(t * 2) % 2 === 0) { wg.fillStyle = `rgba(255,40,40,${k})`; wg.beginPath(); wg.arc(W - px * 1.6, px * 1.5, px * .45, 0, 7); wg.fill(); } }
+  }],
+  rain: ['Rain', (k, W, H, t) => { wg.save(); wg.strokeStyle = `rgba(200,220,255,${.45 * k})`; wg.lineWidth = Math.max(1, W / 540); wg.beginPath(); const n = Math.round(80 * k + 20); for (let i = 0; i < n; i++) { const sp = .9 + rnd2(i * 3 + 1) * .8, x = rnd2(i * 7 + 2) * W * 1.2, y = ((rnd2(i * 11 + 5) + t * sp * 1.6) % 1) * H * 1.2 - H * .1, l = H * (.03 + .03 * rnd2(i)); wg.moveTo(x - l * .25, y); wg.lineTo(x, y + l); } wg.stroke(); wg.restore(); }],
+  snow: ['Snow', (k, W, H, t) => { wg.save(); wg.fillStyle = `rgba(255,255,255,${.85 * k})`; const n = Math.round(90 * k + 20); for (let i = 0; i < n; i++) { const sp = .08 + rnd2(i * 5 + 3) * .12, x = rnd2(i * 13 + 1) * W + Math.sin(t * .8 + i) * W * .02, y = ((rnd2(i * 17 + 7) + t * sp) % 1) * H, r = Math.max(1, W / 360 * (1 + rnd2(i * 19) * 2)); wg.beginPath(); wg.arc(x, y, r, 0, 7); wg.fill(); } wg.restore(); }],
+  sparkle: ['Sparkle', (k, W, H, t) => { wg.save(); wg.globalCompositeOperation = 'lighter'; const n = Math.round(26 * k + 6); for (let i = 0; i < n; i++) { const tw = Math.max(0, Math.sin(t * (2 + rnd2(i * 3) * 3) + i * 1.7)), x = rnd2(i * 23 + 4) * W, y = rnd2(i * 29 + 8) * H, r = Math.min(W, H) * .022 * tw * (.6 + rnd2(i)); if (r < .5) continue; wg.fillStyle = `rgba(255,245,210,${k * tw})`; wg.beginPath(); for (let j = 0; j < 8; j++) { const a = j * Math.PI / 4, rr = j % 2 ? r * .22 : r; wg[j ? 'lineTo' : 'moveTo'](x + Math.cos(a) * rr, y + Math.sin(a) * rr); } wg.closePath(); wg.fill(); } wg.restore(); }],
+  bokeh: ['Bokeh lights', (k, W, H, t) => { wg.save(); wg.globalCompositeOperation = 'screen'; const cols = ['255,190,90', '255,110,150', '120,200,255', '255,240,200']; for (let i = 0; i < 14; i++) { const x = ((rnd2(i * 31 + 2) + t * .02 * (rnd2(i) - .5)) % 1 + 1) % 1 * W, y = rnd2(i * 37 + 9) * H, r = Math.min(W, H) * (.05 + rnd2(i * 41) * .09), g = wg.createRadialGradient(x, y, 0, x, y, r), c = cols[i % 4]; g.addColorStop(0, `rgba(${c},${.35 * k})`); g.addColorStop(.7, `rgba(${c},${.22 * k})`); g.addColorStop(1, `rgba(${c},0)`); wg.fillStyle = g; wg.fillRect(x - r, y - r, r * 2, r * 2); } wg.restore(); }],
+  dust: ['Film dust', (k, W, H, t) => { const f = Math.floor(t * 12); wg.save(); wg.fillStyle = `rgba(20,20,20,${.7 * k})`; for (let i = 0; i < 18; i++) { if (rnd2(f * 50 + i) > .55) continue; const x = rnd2(f * 31 + i * 7) * W, y = rnd2(f * 17 + i * 3) * H, r = Math.max(1, W / 500 * (1 + rnd2(f + i) * 2.5)); wg.beginPath(); wg.arc(x, y, r, 0, 7); wg.fill(); } if (rnd2(f * 3) > .6) { const x = rnd2(f * 7) * W, y = rnd2(f * 9) * H; wg.strokeStyle = `rgba(30,30,30,${.5 * k})`; wg.lineWidth = Math.max(1, W / 700); wg.beginPath(); wg.moveTo(x, y); wg.quadraticCurveTo(x + W * .03, y + H * .02, x + W * .01, y + H * .05); wg.stroke(); } wg.restore(); }],
+  scratches: ['Film scratches', (k, W, H, t) => { const f = Math.floor(t * 18); for (let i = 0; i < 4; i++) { if (rnd2(f * 13 + i) > .5) continue; wg.fillStyle = `rgba(255,255,255,${(.25 + .3 * rnd2(f + i * 5)) * k})`; wg.fillRect(rnd2(f * 7 + i * 11) * W, 0, Math.max(1, W / 600), H); } }],
+  wave: ['Heat wave', (k, W, H, t) => { copyTo(fxC, xg, workC); wg.clearRect(0, 0, W, H); const sh = Math.max(2, Math.round(H / 90)); for (let y = 0; y < H; y += sh) wg.drawImage(fxC, 0, y, W, sh, Math.sin(y / H * 18 + t * 5) * W * .012 * k, y, W, sh); }],
+  split3: ['Triple split', (k, W, H) => { copyTo(fxC, xg, workC); const w3 = W / 3; for (let i = 0; i < 3; i++) wg.drawImage(fxC, W / 2 - w3 / 2, 0, w3, H, i * w3, 0, w3, H); }],
+  grid4: ['Grid', (k, W, H) => { copyTo(fxC, xg, workC); wg.clearRect(0, 0, W, H); for (let i = 0; i < 4; i++) wg.drawImage(fxC, (i % 2) * W / 2, i > 1 ? H / 2 : 0, W / 2, H / 2); }],
+  flipv: ['Mirror vertical', (k, W, H) => { copyTo(fxC, xg, workC); wg.save(); wg.clearRect(0, H / 2, W, H / 2); wg.translate(0, H); wg.scale(1, -1); wg.drawImage(fxC, 0, 0, W, H / 2, 0, 0, W, H / 2); wg.restore(); }],
+  zoomblur: ['Zoom blur', (k, W, H) => { copyTo(fxC, xg, workC); wg.save(); for (let i = 1; i <= 4; i++) { const s = 1 + i * .025 * k; wg.globalAlpha = .22; wg.drawImage(fxC, W / 2 - W * s / 2, H / 2 - H * s / 2, W * s, H * s); } wg.restore(); }],
+  popart: ['Pop art', k => fxFilter('contrast(1.9) saturate(2.2) brightness(1.05)', k)]
+};
+for (const k in FX_X) FX[k] = FX_X[k][0];
 const ANIM_IN = { none: 'None', fade: 'Fade', zoomin: 'Zoom in', zoomout: 'Zoom out', slidel: 'Slide left', slider: 'Slide right', slideu: 'Slide up', slided: 'Slide down', spin: 'Spin', bounce: 'Bounce', blur: 'Blur', swing: 'Swing', shake: 'Shake',
   rise: 'Rise', drop: 'Drop', pop: 'Pop', twist: 'Twist', zoomblur: 'Zoom blur', whip: 'Whip', flicker: 'Flicker' };
 const ANIM_COMBO = { none: 'None', kenburns: 'Ken Burns', zoomslow: 'Slow zoom in', zoomoutslow: 'Slow zoom out', pulse: 'Pulse', sway: 'Sway', float: 'Float', wobble: 'Wobble', heartbeat: 'Heartbeat', spin360: 'Spin 360',
@@ -494,12 +525,16 @@ function restore(i) {
   syncEls(); updUndo(); scheduleSave(); renderTimeline(); renderToolbar(); seekTo(Math.min(T, duration()));
 }
 function updUndo() { $('#undo').disabled = hi <= 0; $('#redo').disabled = hi >= hist.length - 1; }
-function scheduleSave() { clearTimeout(saveT); saveT = setTimeout(saveProject, 500); }
+function scheduleSave() { clearTimeout(saveT); saveT = setTimeout(saveProject, 250); }
 async function saveProject() {
   if (!P) return;
   P.updated = Date.now(); P.dur = duration();
   const first = P.clips[0] && media[P.clips[0].mediaId]; P.thumb = first ? first.thumb : null;
-  try { await putProject(clean(P)); } catch (e) { toast('Could not save the project. Free some storage space.'); }
+  const rec = clean(P), hs = hist.slice(-10), hr = hi - (hist.length - hs.length);
+  // The last undo steps are kept with the project, so Undo still works after a crash or when it is opened again.
+  if (hr >= 0 && hs.reduce((n, x) => n + x.length, 0) < 3e6) { rec.hist = hs; rec.hi = hr; }
+  try { await putProject(rec); } catch (e) { toast('Could not save the project. Free some storage space.'); }
+  noteResume();
 }
 
 /* ================= Media elements ================= */
@@ -514,7 +549,7 @@ function elFor(item, m) {
   el.preload = 'auto'; el.playsInline = true; el.src = m.url; el.preservesPitch = true;
   el.addEventListener('seeked', () => { if (!playing && !offline) requestDraw(); });
   el.addEventListener('loadeddata', () => { if (!playing) requestDraw(); });
-  const g = actx().createGain(); g.connect(master);
+  const g = actx().createGain(); g.gain.value = 0; g.connect(master);
   e = { el, gain: g, mid: m.id, src: null };
   try { e.src = AC.createMediaElementSource(el); } catch (err) { /* already connected */ }
   els[item.id] = e; applyAfx(e, item.afx); return e;
@@ -525,7 +560,12 @@ function dropEl(id) {
   delete els[id];
 }
 function syncEls() { const ids = new Set([...vis().map(c => c.id), ...P.audio.map(a => a.id)]); for (const id of Object.keys(els)) if (!ids.has(id)) dropEl(id); }
-function setGain(e, v, tau = .02) { if (!e.gain) return; const g = e.gain.gain; if (Math.abs(g.value - v) > 0.001) g.setTargetAtTime(v, AC.currentTime, tau); }
+// A paused player gets its volume at once, so a muted clip never sounds for a moment as it starts.
+function setGain(e, v, tau = .02) {
+  if (!e.gain) return; const g = e.gain.gain; if (Math.abs(g.value - v) <= 0.001) return;
+  g.cancelScheduledValues(AC.currentTime);
+  if (e.el.paused) g.setValueAtTime(v, AC.currentTime); else g.setTargetAtTime(v, AC.currentTime, tau);
+}
 
 /* ================= Playback ================= */
 /* Each video player holds one of the phone's few video decoders and a lot of memory, so a project split into many
@@ -549,6 +589,7 @@ function syncMedia(on) {
       const local = t - c._start, want = srcAt(c, local), rate = clamp(rateAt(c, local), 0.0625, 16);
       if (Math.abs(v.playbackRate - rate) > 0.01) v.playbackRate = rate;
       setGain(e, c.muted || (recording && recording.muteBed) ? 0 : c.volume);
+      { const mute = !!(c.muted || (recording && recording.muteBed)); if (v.muted !== mute) v.muted = mute; }
       const tol = hasCurve(c) ? 0.5 : 0.35;
       if (on) { if (Math.abs(v.currentTime - want) > tol) v.currentTime = want; if (v.paused) v.play().catch(() => {}); }
       else { if (!v.paused) v.pause(); if (Math.abs(v.currentTime - want) > 0.03) v.currentTime = want; }
@@ -581,7 +622,7 @@ function play() {
   if (playing || !P) return;
   const D = duration(); if (D <= 0) return;
   if (T >= D - 0.05) T = 0;
-  actx().resume();
+  actx().resume(); prepTrSounds();
   playing = true; playPerf = performance.now(); playT = T;
   syncMedia(true); loop(); updPlay();
 }
@@ -593,7 +634,9 @@ function pause() {
 }
 function loop() {
   raf = requestAnimationFrame(loop);
+  const prevT = T;
   T = playT + (performance.now() - playPerf) / 1000;
+  fireCuts(prevT, T);
   const D = duration();
   if (T >= D) {
     T = D; draw();
@@ -659,7 +702,7 @@ function beatEnv(t) {
   return Math.exp(-((t % 0.5)) * 8);
 }
 function animAt(c, local, len) {
-  const a = c.anim || {}, R = { dx: 0, dy: 0, s: 1, r: 0, o: 1, blur: 0 };
+  const a = c.anim || {}, R = { dx: 0, dy: 0, s: 1, r: 0, o: 1, blur: 0, sx: 1, sy: 1 };
   const di = Math.min(a.dIn || .5, len / 2), dO = Math.min(a.dOut || .5, len / 2);
   const ap = (type, p) => {
     switch (type) {
@@ -682,6 +725,7 @@ function animAt(c, local, len) {
       case 'zoomblur': R.s *= 1 + .8 * p; R.blur += 30 * p; R.o *= 1 - p; break;
       case 'whip': R.dx -= 1.1 * p; R.blur += 36 * p; break;
       case 'flicker': R.o *= p > .02 && rnd2(local * 30) < p ? .1 : 1; break;
+      default: { const x = ANIM_X[type]; if (x) x[1](R, p, local); }
     }
   };
   if (a.in && a.in !== 'none' && local < di) ap(a.in, 1 - easeOut(local / di));
@@ -701,6 +745,7 @@ function animAt(c, local, len) {
     case 'orbit': R.dx += .02 * Math.cos(local * Math.PI); R.dy += .02 * Math.sin(local * Math.PI); break;
     case 'pendulum': R.r += 7 * Math.sin(local * Math.PI * 1.6); break;
     case 'hop': R.dy -= .03 * Math.abs(Math.sin(local * Math.PI * 1.5)); break;
+    default: { const x = ANIM_LOOP_X[a.combo]; if (x) x[1](R, local, len); }
   }
   return R;
 }
@@ -714,8 +759,16 @@ function geom(c, s, W, H, isMain, srcT) {
     sx = c.crop.l * s.w; sy = c.crop.t * s.h; sw = Math.max(2, s.w * (1 - c.crop.l - c.crop.r)); sh = Math.max(2, s.h * (1 - c.crop.t - c.crop.b));
   }
   const iw = sw90 ? sh : sw, ih = sw90 ? sw : sh;
-  const base = (isMain && fit === 'cover') ? Math.max(W / iw, H / ih) : Math.min(W / iw, H / ih);
-  return { sx, sy, sw, sh, r90, sw90, dw: iw * base, dh: ih * base, fit };
+  // A crop keeps the scale of the whole picture, so the part that is kept stays the same size and in the same place.
+  const cropped = !!c.crop && !(c.frame && isMain && !sw90 && c.frame.x && c.frame.x.length);
+  const bw = cropped ? (sw90 ? s.h : s.w) : iw, bh = cropped ? (sw90 ? s.w : s.h) : ih;
+  const base = (isMain && fit === 'cover') ? Math.max(W / bw, H / bh) : Math.min(W / bw, H / bh);
+  let ox = 0, oy = 0;
+  if (cropped) {
+    ox = (sx + sw / 2 - s.w / 2) * base; oy = (sy + sh / 2 - s.h / 2) * base;
+    if (r90 === 90) [ox, oy] = [-oy, ox]; else if (r90 === 180) [ox, oy] = [-ox, -oy]; else if (r90 === 270) [ox, oy] = [oy, -ox];
+  }
+  return { sx, sy, sw, sh, r90, sw90, dw: iw * base, dh: ih * base, fit, ox, oy };
 }
 function prepFor(id) { drawnIds.add(id); let p = prepMap.get(id); if (!p) { const c = C(); p = { c, g: ctx2d(c) }; prepMap.set(id, p); } return p; }
 // Each of these canvases can be 18 MB at export size; the ones for items not drawn in this frame are freed.
@@ -764,11 +817,15 @@ function drawVI(tctx, c, t, W, H, isMain, noMb) {
     wg.filter = 'blur(' + Math.round(W / 40) + 'px) brightness(.6)'; const k = Math.max(W / pw, H / ph); wg.drawImage(prep, (W - pw * k) / 2, (H - ph * k) / 2, pw * k, ph * k); wg.filter = 'none';
   }
   const tw = tf.w || 1, th = tf.h || 1;
-  wg.save(); wg.translate(x, y); wg.rotate(rot * Math.PI / 180); wg.scale(sc * tw, sc * th); wg.globalAlpha = clamp(op, 0, 1);
+  // The kept part of a cropped picture sits where it was in the whole picture.
+  const offs = (s0, r0) => { const a = r0 * Math.PI / 180, ux = (G.ox || 0) * s0 * tw, uy = (G.oy || 0) * s0 * th; return [ux * Math.cos(a) - uy * Math.sin(a), ux * Math.sin(a) + uy * Math.cos(a)]; };
+  if (G.ox || G.oy) { const [ax, ay] = offs(sc, rot); x += ax; y += ay; }
+  wg.save(); wg.translate(x, y); wg.rotate(rot * Math.PI / 180); wg.scale(sc * tw * (A.sx || 1), sc * th * (A.sy || 1)); wg.globalAlpha = clamp(op, 0, 1);
   wg.drawImage(prep, -G.dw / 2, -G.dh / 2, G.dw, G.dh); wg.restore(); wg.globalAlpha = 1;
   c._box = { x, y, w: G.dw * sc * tw, h: G.dh * sc * th, rot };
   // The edit frame shows the resting size and place, without animations or shake.
-  c._frame = { x: tf.x * W, y: tf.y * H, w: G.dw * tf.s * tw, h: G.dh * tf.s * th, rot: tf.r };
+  const [fx0, fy0] = G.ox || G.oy ? offs(tf.s, tf.r) : [0, 0];
+  c._frame = { x: tf.x * W + fx0, y: tf.y * H + fy0, w: G.dw * tf.s * tw, h: G.dh * tf.s * th, rot: tf.r };
   frameFx(c, t, W, H, isMain);
   let out = workC;
   if (fx.motionblur && !noMb && (playing || exporting)) {
@@ -821,6 +878,7 @@ function frameFx(c, t, W, H, isMain) {
   if (fx.vignette) { const gr = wg.createRadialGradient(W / 2, H / 2, Math.min(W, H) * .25, W / 2, H / 2, Math.hypot(W, H) / 2); gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(1, `rgba(0,0,0,${.9 * v('vignette')})`); wg.globalCompositeOperation = 'source-atop'; wg.fillStyle = gr; wg.fillRect(0, 0, W, H); wg.globalCompositeOperation = 'source-over'; }
   if (fx.strobe && beatEnv(t) > .55) { wg.globalCompositeOperation = 'source-atop'; wg.fillStyle = `rgba(255,255,255,${.75 * v('strobe') * beatEnv(t)})`; wg.fillRect(0, 0, W, H); wg.globalCompositeOperation = 'source-over'; }
   if (fx.letterbox) { const bh = Math.max(0, (H - Math.min(H, W / 2.35)) / 2) * v('letterbox') + H * .04 * v('letterbox'); wg.fillStyle = '#000'; wg.fillRect(0, 0, W, bh); wg.fillRect(0, H - bh, W, bh); }
+  for (const k of on) if (FX_X[k]) { wg.save(); FX_X[k][1](v(k), W, H, t); wg.restore(); }
   if (!isMain) { wg.globalCompositeOperation = 'destination-in'; wg.drawImage(alphaC, 0, 0); wg.globalCompositeOperation = 'source-over'; }
 }
 function beautify(pg, prep, pw, ph, k) {
@@ -937,6 +995,12 @@ function drawEnding(ctx, W, H, u) {
 }
 // Draws one frame of a clip with transition tr at progress p (0 → 0.5 is the outgoing clip, 0.5 → 1 the incoming one).
 function paintTransition(ctx, frame, W, H, tr, p, tmp, tx) {
+  if (tr && TRANS_X[tr]) {
+    ctx.save();
+    try { TRANS_X[tr][2](ctx, frame, W, H, 1 - Math.abs(p - .5) * 2, p < .5 ? -1 : 1, p, tmp, tx); }
+    finally { ctx.restore(); }
+    return;
+  }
   const k = tr ? 1 - Math.abs(p - 0.5) * 2 : 0, dir = p < .5 ? -1 : 1;
   ctx.save();
   if (tr === 'zoom' || tr === 'spin' || tr === 'zoomout') { const sc = tr === 'zoomout' ? 1 - k * .35 : 1 + k * .35; ctx.translate(W / 2, H / 2); if (tr === 'spin') ctx.rotate(-dir * k * .35); ctx.scale(sc, sc); ctx.translate(-W / 2, -H / 2); }
@@ -1012,6 +1076,7 @@ function drawOverlays(ctx, W, H, t) {
     if (t < o.start || t >= o.end) { o._box = o._frame = null; continue; }
     const local = t - o.start, len = o.end - o.start, tf = ovTf(o, local);
     let alpha = tf.o, sc = tf.s, dy = 0, dx = 0, rot = tf.r, text = o.auto ? autoText(o, local, len) : o.text;
+    let sx = 1, sy = 1, blurK = 0, track = 0, letters = null;
     if (o.auto === 'countdown') sc *= 1 + .22 * Math.pow(1 - ((len - local) % 1 + 1) % 1, 4);
     const inP = clamp(local / 0.4, 0, 1), outP = clamp((len - local) / 0.25, 0, 1);
     switch (o.anim) {
@@ -1027,30 +1092,44 @@ function drawOverlays(ctx, W, H, t) {
       case 'swing': rot += (1 - easeOut(inP)) * -40 * Math.cos(inP * Math.PI * 1.5); alpha *= inP; break;
       case 'flicker': if (local < .9 && rnd2(t * 26) > clamp(local / .9, 0, 1)) alpha *= .12; break;
       case 'stretch': sc *= inP < 1 ? .3 + .7 * easeOut(inP) + Math.sin(inP * Math.PI) * .15 : 1; alpha *= inP; break;
+      default: { const x = TEXT_ANIM_X[o.anim]; if (x) { const st = { alpha, sc, dy, dx, rot, sx, sy, blur: 0, track: 0, letters: null }; x[1](st, local, len, t, W, H); ({ alpha, sc, dy, dx, rot, sx, sy } = st); blurK = st.blur; track = st.track; letters = st.letters; } }
     }
     if (o.anim && o.anim !== 'none') alpha *= outP;
     const px = (o.size || 6) / 100 * H, f = FONTS[o.font] || FONTS.classic;
     ctx.save();
     ctx.globalAlpha = clamp(alpha, 0, 1);
     const tw = tf.w || 1, th = tf.h || 1;
-    ctx.translate(tf.x * W + dx, tf.y * H + dy); ctx.rotate(rot * Math.PI / 180); ctx.scale(sc * tw, sc * th);
+    ctx.translate(tf.x * W + dx, tf.y * H + dy); ctx.rotate(rot * Math.PI / 180); ctx.scale(sc * tw * sx, sc * th * sy);
+    if (blurK > .005) ctx.filter = `blur(${(blurK * px).toFixed(1)}px)`;
     ctx.font = o.type === 'sticker' ? `${px}px "Noto Color Emoji","Apple Color Emoji","Segoe UI Emoji",sans-serif` : `${f[1]} ${px}px ${f[2]}`;
-    if ('letterSpacing' in ctx) ctx.letterSpacing = o.spacing ? `${(o.spacing * px / 100).toFixed(1)}px` : '0px';
+    { const sp = (o.spacing || 0) + track; if ('letterSpacing' in ctx) ctx.letterSpacing = sp ? `${(sp * px / 100).toFixed(1)}px` : '0px'; }
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     const lines = String(text || ' ').split('\n'), lh = px * 1.18;
     const wMax = Math.max(...lines.map(l => ctx.measureText(l || ' ').width), px * 0.5);
     const boxW = wMax + px * 0.7, boxH = lh * lines.length + px * 0.35;
     if (o.type === 'text' && o.box) { const ga = ctx.globalAlpha; ctx.globalAlpha = ga * clamp(o.boxAlpha == null ? 1 : o.boxAlpha, 0, 1); ctx.fillStyle = o.boxColor || (o.color === '#000000' ? 'rgba(255,255,255,.88)' : 'rgba(0,0,0,.72)'); roundRect(ctx, -boxW / 2, -boxH / 2, boxW, boxH, px * 0.25); ctx.fill(); ctx.globalAlpha = ga; }
+    // One line or one letter in the item's style: 3D depth, glow or shadow, outline, then a colour or gradient fill.
+    const paint = (str, x, y, col) => {
+      if (o.type !== 'text') { ctx.fillText(str, x, y); return; }
+      if (o.depth) { const n = Math.max(2, Math.round(7 * o.depth)), st = px * .014; ctx.fillStyle = o.depthColor || shadeOf(o.color); for (let j = n; j >= 1; j--) ctx.fillText(str, x + j * st, y + j * st); }
+      if (o.glow) { ctx.shadowColor = o.color; ctx.shadowBlur = px * 0.7; }
+      else if (o.shadow || (!o.box && !o.depth)) { ctx.shadowColor = o.shadow ? 'rgba(0,0,0,.75)' : 'rgba(0,0,0,.45)'; ctx.shadowBlur = px * (o.shadow ? .25 : .12); ctx.shadowOffsetY = px * (o.shadow ? .08 : .04); }
+      if (o.stroke) { ctx.lineJoin = 'round'; ctx.lineWidth = px * 0.16; ctx.strokeStyle = o.color === '#000000' ? '#fff' : '#000'; ctx.strokeText(str, x, y); }
+      ctx.fillStyle = col || (o.grad && GRADS[o.grad] ? gradFill(ctx, o.grad, y, px) : o.color); ctx.fillText(str, x, y);
+      if (o.glow) { ctx.shadowBlur = px * 0.25; ctx.fillText(str, x, y); }
+      ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+    };
     lines.forEach((l, i) => {
       const y = (i - (lines.length - 1) / 2) * lh;
-      if (o.type === 'text') {
-        if (o.glow) { ctx.shadowColor = o.color; ctx.shadowBlur = px * 0.7; }
-        else if (o.shadow || !o.box) { ctx.shadowColor = o.shadow ? 'rgba(0,0,0,.75)' : 'rgba(0,0,0,.45)'; ctx.shadowBlur = px * (o.shadow ? .25 : .12); ctx.shadowOffsetY = px * (o.shadow ? .08 : .04); }
-        if (o.stroke) { ctx.lineJoin = 'round'; ctx.lineWidth = px * 0.16; ctx.strokeStyle = o.color === '#000000' ? '#fff' : '#000'; ctx.strokeText(l, 0, y); }
-        ctx.fillStyle = o.color; ctx.fillText(l, 0, y);
-        if (o.glow) { ctx.shadowBlur = px * 0.25; ctx.fillText(l, 0, y); }
-        ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
-      } else ctx.fillText(l, 0, y);
+      if (letters && o.type === 'text') {
+        const ch = [...l], wl = ctx.measureText(l).width;
+        ch.forEach((c, j) => {
+          const L = letters(j, ch.length, local, i) || {}, a = L.a == null ? 1 : L.a; if (a <= .001) return;
+          const cx = -wl / 2 + ctx.measureText(ch.slice(0, j).join('')).width + ctx.measureText(c).width / 2;
+          ctx.save(); ctx.translate(cx + (L.dx || 0) * px, y + (L.dy || 0) * px); if (L.r) ctx.rotate(L.r); if (L.s != null) ctx.scale(L.s, L.s);
+          ctx.globalAlpha *= clamp(a, 0, 1); paint(c, 0, 0, L.col); ctx.restore();
+        });
+      } else paint(l, 0, y);
     });
     o._box = { x: tf.x * W + dx, y: tf.y * H + dy, w: boxW * sc * tw, h: boxH * sc * th, rot };
     o._frame = { x: tf.x * W, y: tf.y * H, w: boxW * tf.s * tw, h: boxH * tf.s * th, rot: tf.r };
@@ -1432,14 +1511,13 @@ tlIn.addEventListener('click', ev => {
   if (noClick) { noClick = false; return; }
   const trn = ev.target.closest('[data-trn]');
   if (trn) { select({ type: 'clip', id: trn.dataset.trn }); openTool('transition'); return; }
-  const blk = ev.target.closest('.blk');
-  if (!blk) { if (sel) select(null); return; }
+  // The playhead goes exactly where the finger tapped, on an item or on an empty part of the timeline.
+  const blk = ev.target.closest('.blk'), at = clamp((ev.clientX - tlIn.getBoundingClientRect().left - pad()) / pps, 0, duration());
+  if (!blk) { if (sel) select(null); seekTo(at); return; }
   const k = blk.dataset.k, id = blk.dataset.id;
-  if (sel && sel.type === k && sel.id === id) return;
-  select({ type: k, id });
-  if (k === 'end') { layout(); if (T < P._main) seekTo(P._main + .01); return; }
-  const it = findSel(); layout();
-  if (it) { const s = k === 'clip' || k === 'layer' ? it._start : it.start, e = k === 'clip' || k === 'layer' ? it._start + clipLen(it) : k === 'ov' ? it.end : it.start + auLen(it); if (T < s || T >= e) seekTo(s + 0.01); }
+  if (!(sel && sel.type === k && sel.id === id)) select({ type: k, id });
+  else { quickOff = false; showQuick(); }
+  seekTo(at);
 });
 /* Zoom: pinch with two fingers anywhere on the timeline, the − / + buttons, or Ctrl + mouse wheel. */
 const pinch = { on: false, d0: 0, p0: 0 };
@@ -1450,7 +1528,12 @@ tl.addEventListener('touchstart', e => {
   if (dragging) { const d = dragging; dragging = null; showSnap(null); stopAuto(); if (d.moved) Object.assign(d.item, d.orig); }
   pinch.on = true; pinch.d0 = Math.max(1, tDist(e)); pinch.p0 = pps; tl.classList.add('pinching');
 }, { passive: true });
-tl.addEventListener('touchmove', e => { if (!pinch.on || e.touches.length !== 2) return; if (e.cancelable) e.preventDefault(); setZoom(pinch.p0 * tDist(e) / pinch.d0); }, { passive: false });
+tl.addEventListener('touchmove', e => {
+  if (!pinch.on || e.touches.length !== 2) return; if (e.cancelable) e.preventDefault();
+  // Fingers report many moves per frame; the timeline is redrawn at most once per frame so zooming stays smooth.
+  pinch.want = pinch.p0 * tDist(e) / pinch.d0;
+  if (!pinch.raf) pinch.raf = requestAnimationFrame(() => { pinch.raf = 0; if (pinch.on) setZoom(pinch.want); });
+}, { passive: false });
 const pinchEnd = e => { if (pinch.on && e.touches.length < 2) { pinch.on = false; tl.classList.remove('pinching'); renderTimeline(); } };
 tl.addEventListener('touchend', pinchEnd); tl.addEventListener('touchcancel', pinchEnd);
 tl.addEventListener('wheel', e => { if (!e.ctrlKey) return; e.preventDefault(); setZoom(pps * (e.deltaY < 0 ? 1.15 : 1 / 1.15)); }, { passive: false });
@@ -1553,7 +1636,7 @@ cv.addEventListener('pointerup', pvEnd); cv.addEventListener('pointercancel', pv
 function inBox(b, x, y) { const a = -b.rot * Math.PI / 180, dx = x - b.x, dy = y - b.y, lx = dx * Math.cos(a) - dy * Math.sin(a), ly = dx * Math.sin(a) + dy * Math.cos(a); return Math.abs(lx) <= b.w / 2 + 12 && Math.abs(ly) <= b.h / 2 + 12; }
 
 /* ================= Selection / toolbar ================= */
-function select(s) { sel = s; closeSheet(); renderTimeline(); renderToolbar(); requestDraw(); }
+function select(s) { sel = s; if (s) quickOff = false; closeSheet(true); renderTimeline(); renderToolbar(); requestDraw(); }
 /* Line icons (24×24, stroked) so the toolbar stays calm and monochrome. */
 const IC = {
   edit: 'M6 4l6 8m0 0l6-8m-6 8l-4 6m4-6l4 6M5 20a2 2 0 1 0 0-.1M19 20a2 2 0 1 0 0-.1',
@@ -1582,8 +1665,9 @@ const IC = {
 };
 IC.endoff = IC.delete; IC.endnever = 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM5.6 5.6l12.8 12.8';
 IC.trim = 'M9 4H6v16h3M15 4h3v16h-3M10 12h4';
+IC.resize = 'M4 14v6h6M20 10V4h-6M4 20l7-7M20 4l-7 7';
 const icon = (id, cls = 'i') => `<svg class="${cls}" viewBox="0 0 24 24"><path d="${IC[id] || IC.effects}"/></svg>`;
-const T_COMMON_VI = [['split', 'Split'], ['trim', 'Trim'], ['speed', 'Speed'], ['curve', 'Speed curve'], ['volume', 'Volume'], ['anim', 'Animation'], ['transform', 'Transform'], ['crop', 'Crop'], ['mask', 'Mask'], ['effects', 'Effects'], ['filters', 'Filters'], ['adjust', 'Adjust'], ['beauty', 'Beauty', 'ai']];
+const T_COMMON_VI = [['split', 'Split'], ['trim', 'Trim'], ['speed', 'Speed'], ['curve', 'Speed curve'], ['volume', 'Volume'], ['anim', 'Animation'], ['transform', 'Transform'], ['crop', 'Crop'], ['resize', 'Resize'], ['mask', 'Mask'], ['effects', 'Effects'], ['filters', 'Filters'], ['adjust', 'Adjust'], ['beauty', 'Beauty', 'ai']];
 const TOOLS = {
   root: [['edit', 'Edit'], ['add', 'Add media'], ['overlay', 'Overlay'], ['audio', 'Audio'], ['sfx', 'Sound FX'], ['text', 'Text'], ['sticker', 'Stickers'], ['layout', 'Split screen'], ['rootfx', 'Effects'], ['captions', 'Captions', 'ai'], ['ai', 'Smart tools', 'ai'], ['muteall', 'Mute clips'], ['format', 'Format'], ['snapshot', 'Snapshot']],
   clip: [['back', 'Back', 'back'], ...T_COMMON_VI, ['chroma', 'Chroma key'], ['removebg', 'Remove BG', 'ai'], ['portrait', 'BG blur', 'ai'], ['relight', 'Relight', 'ai'], ['stabilize', 'Stabilize', 'ai'], ['autoframe', 'Auto frame', 'ai'], ['freeze', 'Freeze'], ['reverse', 'Reverse'], ['detach', 'Extract audio'], ['denoise', 'Noise reduce', 'ai'], ['normalize', 'Loudness'], ['voicefx', 'Voice effects'], ['transition', 'Transition'], ['silence', 'Magic cut', 'ai'], ['enhance', 'Enhance', 'ai'], ['copystyle', 'Copy style'], ['pastestyle', 'Paste style'], ['replace', 'Replace'], ['fit', 'Fit / Fill'], ['rotate', 'Rotate'], ['dup', 'Duplicate'], ['left', 'Move left'], ['right', 'Move right'], ['delete', 'Delete', 'danger']],
@@ -1597,20 +1681,21 @@ function renderToolbar() {
   const it = sel && sel.type === 'ov' && findSel();
   if (it && it.caption) { set = set.map(t => t[0] === 'editov' ? ['editov', 'Edit caption'] : t); set = [...set.slice(0, 2), ['captions', 'All captions'], ...set.slice(2)]; }
   $('#toolbar').innerHTML = set.map(([id, lab, cls]) => `<button type="button" class="tool ${cls || ''}" data-tool="${id}"><span class="ic">${icon(id)}</span>${lab}</button>`).join('');
+  showQuick();
 }
 $('#toolbar').addEventListener('click', e => { const b = e.target.closest('[data-tool]'); if (b) openTool(b.dataset.tool); });
 
 /* ================= Sheets ================= */
 let sheetClose = null;
-/* Edit sheets (speed, volume, filters…) preview changes live but only keep them when ✓ Apply is tapped.
-   Cancel, the back button or tapping outside puts the item back the way it was. */
+/* Edit sheets (speed, volume, filters…) preview changes live. ✓ Apply, tapping outside or the back button keeps them;
+   ✕ puts the item back the way it was. */
 let edit = null;
 // Settings that "Apply to all" copies to every other item of the same kind. "a.b" copies one key inside an object.
 const APPLY_ALL = {
   speed: ['speed'], curve: ['curve'], volume: ['volume', 'muted'], avolume: ['volume'], aspeed: ['rate'], fade: ['fadeIn', 'fadeOut'], filters: ['filter'],
-  adjust: ['adj', 'fx.vignette', 'fx.grain'], effects: ['fx'], anim: ['anim'], transition: ['transition'], voicefx: ['afx'], relight: ['relight'], beauty: ['fx.beauty'], crop: ['crop'], mask: ['mask']
+  adjust: ['adj', 'fx.vignette', 'fx.grain'], effects: ['fx'], anim: ['anim'], transition: ['transition', 'trSfx', 'trVol'], voicefx: ['afx'], relight: ['relight'], beauty: ['fx.beauty'], crop: ['crop'], mask: ['mask']
 };
-const EDIT_TOOLS = new Set([...Object.keys(APPLY_ALL), 'transform', 'chroma', 'blend', 'editov', 'trim']);
+const EDIT_TOOLS = new Set([...Object.keys(APPLY_ALL), 'transform', 'chroma', 'blend', 'editov', 'trim', 'resize']);
 const editSiblings = () => {
   if (!sel || !edit) return [];
   const list = { clip: P.clips, layer: P.layers, ov: P.overlays, au: P.audio }[sel.type] || [];
@@ -1624,6 +1709,8 @@ function copyKey(src, dst, key) {
 function openSheet(title, html, bind, onClose) {
   if (sheetClose) { const f = sheetClose; sheetClose = null; f(); }
   $('#sheet').classList.remove('tall');
+  // A fresh body each time, so taps meant for an earlier sheet can never reach this one.
+  { const old = $('#sheetBody'), nb = old.cloneNode(false); old.replaceWith(nb); }
   $('#sheetTitle').textContent = title; $('#sheetBody').innerHTML = html;
   $('#sheet').hidden = false; $('#sheetBack').hidden = false;
   const ed = !!edit, all = ed && APPLY_ALL[edit.tool] && editSiblings().length > 1;
@@ -1646,7 +1733,7 @@ function closeSheet(apply) {
     const keep = P.id; P = normalize(JSON.parse(e.snap)); P.id = keep;
     if (sel && !findSel()) sel = null;
     syncEls(); renderTimeline(); renderToolbar(); seekTo(Math.min(T, duration()));
-    toast('Not applied. Tap ✓ Apply to keep a change.');
+    toast('Change cancelled');
   }
 }
 function applyToAll() {
@@ -1660,7 +1747,7 @@ function applyToAll() {
 $('#sheetDone').onclick = () => closeSheet(true);
 $('#sheetCancel').onclick = () => closeSheet(false);
 $('#sheetAll').onclick = applyToAll;
-$('#sheetBack').onclick = () => closeSheet(false);
+$('#sheetBack').onclick = () => closeSheet(true);
 function slider(id, label, min, max, step, val, fmtv = v => v) { return `<div class="row"><label for="${id}">${label}</label><input type="range" id="${id}" min="${min}" max="${max}" step="${step}" value="${val}"><output id="${id}O">${fmtv(+val)}</output></div>`; }
 function bindSlider(root, id, fmtv, onInput) { const i = $('#' + id, root), o = $('#' + id + 'O', root); if (!i) return; i.addEventListener('input', () => { o.textContent = fmtv(+i.value); onInput(+i.value); requestDraw(); }); i.addEventListener('change', commit); }
 const chipRow = (name, opts, cur, scroll) => `<div class="chips${scroll ? ' scroll' : ''}" data-chips="${name}">${Object.entries(opts).map(([k, v]) => `<button type="button" class="chip" data-v="${k}" aria-pressed="${k === String(cur)}">${Array.isArray(v) ? v[0] : v}</button>`).join('')}</div>`;
@@ -1780,7 +1867,7 @@ function animGraph(cvs, leg, it) {
 }
 function demoCard(x, w, h, R, colA, colB, label) {
   const cw = w * .5, ch = h * .56;
-  x.save(); x.translate(w / 2 + R.dx * w, h / 2 + R.dy * h); x.rotate(R.r * Math.PI / 180); x.scale(R.s, R.s); x.globalAlpha = clamp(R.o, 0, 1);
+  x.save(); x.translate(w / 2 + R.dx * w, h / 2 + R.dy * h); x.rotate(R.r * Math.PI / 180); x.scale(R.s * (R.sx || 1), R.s * (R.sy || 1)); x.globalAlpha = clamp(R.o, 0, 1);
   if (R.blur > .5) x.filter = `blur(${(R.blur / 26 * 5).toFixed(1)}px)`;
   const gr = x.createLinearGradient(-cw / 2, -ch / 2, cw / 2, ch / 2); gr.addColorStop(0, colA); gr.addColorStop(1, colB);
   x.fillStyle = gr; roundRect(x, -cw / 2, -ch / 2, cw, ch, 8); x.fill();
@@ -1921,8 +2008,7 @@ async function runTool(id) {
       r => { const viz = () => fadeGraph($('#fdG', r), it); viz(); bindSlider(r, 'fi', v => v.toFixed(1) + 's', v => { it.fadeIn = v; viz(); }); bindSlider(r, 'fo', v => v.toFixed(1) + 's', v => { it.fadeOut = v; viz(); }); });
     case 'filters': return filtersSheet(it);
     case 'adjust': return adjustSheet(it);
-    case 'transition': return openSheet('Transition to next clip', vizBox('trDemo', 130, 'Clip A → Clip B') + chipRow('tr', TRANSITIONS, it.transition) + '<p class="note">The effect plays across the cut, half a second in total. Tap Apply to all to use it on every cut.</p>',
-      r => { transitionDemo($('#trDemo', r), () => it.transition); bindChips(r, 'tr', v => { it.transition = v; commit(); layout(); seekTo(Math.max(0, it._start + clipLen(it) - 0.6)); play(); setTimeout(() => { if (playing) pause(); }, 1100); }); });
+    case 'transition': return transitionSheet(it);
     case 'silence': return silenceCut(it);
     case 'enhance': return enhance([it]);
     case 'portrait': return segToggle(it, 'blurBg', 'Background blur');
@@ -1931,6 +2017,7 @@ async function runTool(id) {
     case 'anim': return sel.type === 'ov' ? openSheet('Animation', vizBox('anDemo', 120, 'How it moves') + chipRow('an', ANIMS, it.anim || 'none') + '<p class="note">In-animations play when the item appears; every animated item fades out at its end.</p>', r => { textAnimDemo($('#anDemo', r), it); bindChips(r, 'an', v => { it.anim = v; commit(); previewAt(it, 1.3); }); }) : animSheet(it);
     case 'transform': return transformSheet(it);
     case 'crop': return cropSheet(it);
+    case 'resize': return resizeSheet(it);
     case 'mask': return maskSheet(it);
     case 'effects': return effectsSheet(it);
     case 'blend': return openSheet('Blend', chipRow('bl', BLENDS, it.blend, true) + slider('blo', 'Opacity', 0, 1, .01, tfAt(it, localOf(it)).o, pct), r => { bindChips(r, 'bl', v => { it.blend = v; commit(); }); bindSlider(r, 'blo', pct, v => setTf(it, { o: v }, localOf(it))); });
@@ -1956,6 +2043,21 @@ async function runTool(id) {
   }
 }
 
+/* Quick bar: Split, Delete and ✕ float over the preview whenever something is selected or split, so the most used
+   actions are one tap away. ✕ hides it until the next selection. */
+let quickOff = false;
+function showQuick() {
+  const q = $('#qbar'); if (!q) return;
+  const on = !!(P && sel && !quickOff && !exporting && (sel.type === 'end' || findSel()));
+  q.hidden = !on; if (on) q.querySelector('[data-q="split"]').hidden = sel.type === 'end';
+}
+$('#qbar').innerHTML = `<button type="button" data-q="split">${icon('split')}Split</button><button type="button" class="del" data-q="delete">${icon('delete')}Delete</button><button type="button" class="x" data-q="close" aria-label="Hide these buttons">${icon('close')}</button>`;
+$('#qbar').addEventListener('click', e => {
+  const b = e.target.closest('[data-q]'); if (!b || !sel) return;
+  if (b.dataset.q === 'close') { quickOff = true; showQuick(); return; }
+  if (b.dataset.q === 'split') openTool('split'); else openTool(sel.type === 'end' ? 'endoff' : 'delete');
+});
+
 /* ---- edit operations ---- */
 function splitSel() {
   const it = findSel(); if (!it) return;
@@ -1972,7 +2074,7 @@ function splitSel() {
     const local = (T - it.start) * it.rate; if (local <= 0.05 || local >= it.out - it.in - 0.05) { toast('Move the playhead inside the audio to split it'); return; }
     const b = { ...deep(clean(it)), id: uid(), start: T, in: it.in + local, fadeIn: 0 }; it.out = it.in + local; it.fadeOut = 0; P.audio.push(b);
   }
-  commit(); toast('Split');
+  commit(); quickOff = false; renderToolbar(); toast('Split');
 }
 // Cuts a video or photo clip at source time src. The original keeps the first part; the new second part is returned.
 function splitVI(it, src, isLayer) {
@@ -1986,7 +2088,7 @@ function splitVI(it, src, isLayer) {
   b.stab = cut(it.stab); b.frame = cut(it.frame);
   // The in-animation stays on the first part and the out-animation moves to the second.
   it.anim = { ...it.anim, out: 'none' }; b.anim = { ...b.anim, in: 'none' };
-  if (!isLayer) { b.transition = it.transition; it.transition = 'none'; P.clips.splice(P.clips.indexOf(it) + 1, 0, b); }
+  if (!isLayer) { b.transition = it.transition; it.transition = 'none'; it.trSfx = null; P.clips.splice(P.clips.indexOf(it) + 1, 0, b); }
   else { b.start = start0 + clipLen(it); P.layers.push(b); }
   return b;
 }
@@ -2105,24 +2207,91 @@ function audioSheet() {
   });
 }
 
-/* ---- voiceover ---- */
+/* ---- voiceover ----
+   Record, a countdown (5 s unless changed), then recording while the video plays. After stopping, the take can be
+   heard with the video, then kept (Done) or thrown away (Retake). Clean voice cuts rumble, evens out the level and
+   removes background noise once the take is recorded. */
+let take = null, countdown = null;
 function voiceSheet() {
+  const cd0 = +store.get('sc_cd', 5), mic0 = store.get('sc_mic', 'clean') === 'natural' ? 'natural' : 'clean';
   openSheet('Voiceover', `<div class="rec-time" id="recTime">0:00.0</div><button type="button" class="rec-btn" id="recBtn" aria-label="Start recording"></button>
+    <div class="rec-rev" id="recRev" hidden><button type="button" class="btn" id="recRetake">${icon('reverse')}Retake</button><button type="button" class="btn" id="recPlay">${icon('play')}Listen</button><button type="button" class="btn main" id="recDone">${icon('check')}Done</button></div>
+    <div id="recOpts"><div class="lab">Countdown before recording</div>${chipRow('recCd', { 5: '5 seconds', 3: '3 seconds', 0: 'Off' }, [0, 3, 5].includes(cd0) ? cd0 : 5)}
+    <div class="lab">Microphone</div>${chipRow('recMic', { clean: 'Clean voice', natural: 'Natural' }, mic0)}<p class="note" id="recMicN"></p>
     <div class="row"><label for="recMute">Video sound</label><select class="sel" id="recMute"><option value="1">Muted while recording (no echo)</option><option value="0">Play while recording (use headphones)</option></select></div>
-    <p class="note">Recording starts at ${fmt(T)} and stops at the end of the video or when you tap again.</p>`,
-  r => { $('#recBtn', r).onclick = () => recording ? stopVoice() : startVoice($('#recMute', r).value === '1'); }, () => { if (recording) stopVoice(); });
+    <p class="note">Recording starts at ${fmt(T)} and stops at the end of the video or when you tap again.</p></div>`,
+  r => {
+    let cd = [0, 3, 5].includes(cd0) ? cd0 : 5, mic = mic0;
+    const micNote = () => { $('#recMicN', r).textContent = mic === 'clean' ? 'Removes background noise, hum and rumble and evens out the level, so only your voice comes through, clear and neat.' : 'Records everything exactly as the microphone hears it.'; };
+    micNote();
+    bindChips(r, 'recCd', v => { cd = +v; store.set('sc_cd', cd); });
+    bindChips(r, 'recMic', v => { mic = v; store.set('sc_mic', v); micNote(); });
+    $('#recBtn', r).onclick = () => {
+      if (countdown) { cancelCountdown(); return; }
+      if (recording) { stopVoice(); return; }
+      if (!take) armVoice($('#recMute', r).value === '1', mic === 'clean', cd);
+    };
+    $('#recRetake', r).onclick = () => { discardTake(); showTake(); };
+    $('#recPlay', r).onclick = () => {
+      if (!take) return; if (playing) { pause(); return; }
+      const a = take.a, end = a.start + auLen(a); seekTo(a.start); play();
+      const chk = setInterval(() => { if (!playing || T >= end) { clearInterval(chk); if (playing) pause(); } }, 100);
+    };
+    $('#recDone', r).onclick = () => keepTake();
+    showTake();
+  }, () => { cancelCountdown(); if (recording) stopVoice(); else if (take) keepTake(true); });
 }
-async function startVoice(muteBed) {
+async function armVoice(muteBed, clean, secs) {
   let stream;
-  // Echo cancellation would switch Android into phone-call audio (sound from the earpiece, stuck videos), so it is
-  // left off; the video's sound is muted while recording unless headphones are used.
-  try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: true, autoGainControl: true } }); }
+  // Echo cancellation would switch Android into phone-call audio (sound from the earpiece, stuck videos), so it stays off.
+  const c = clean ? { echoCancellation: false, noiseSuppression: true, autoGainControl: true } : { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: c }); }
   catch (e) { toast('Microphone access was blocked. Allow it in Android settings > Apps > SplashCut > Permissions.', 4500); return; }
+  if (!secs) { startVoice(stream, muteBed, clean); return; }
+  const b = $('#recBtn'), el = $('#recTime'); if (b) b.classList.add('wait');
+  let n = secs;
+  const tick = () => {
+    if (!countdown) return;
+    if (n <= 0) { countdown = null; if (b) b.classList.remove('wait'); startVoice(stream, muteBed, clean); return; }
+    if (el) { el.textContent = String(n); el.classList.add('cd'); el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop'); }
+    beep(n === 1 ? 1320 : 880, .09); haptic('snap'); n--;
+    countdown.t = setTimeout(tick, 1000);
+  };
+  countdown = { stream, t: 0 }; tick();
+}
+function cancelCountdown() {
+  if (!countdown) return;
+  clearTimeout(countdown.t); countdown.stream.getTracks().forEach(t => t.stop()); countdown = null;
+  const b = $('#recBtn'), el = $('#recTime'); if (b) b.classList.remove('wait'); if (el) { el.textContent = '0:00.0'; el.classList.remove('cd', 'pop'); }
+  setTimeout(restoreAudio, 150);
+}
+// A short tick for the countdown. It goes straight to the speaker, so it is never part of the video.
+function beep(f, d) {
+  try {
+    const ac = actx(); ac.resume(); const o = ac.createOscillator(), g = ac.createGain(), t = ac.currentTime;
+    o.frequency.value = f; g.gain.setValueAtTime(.0001, t); g.gain.exponentialRampToValueAtTime(.25, t + .01); g.gain.exponentialRampToValueAtTime(.0001, t + d);
+    o.connect(g); g.connect(ac.destination); o.start(t); o.stop(t + d + .02);
+  } catch (e) { /* no sound available */ }
+}
+function startVoice(stream, muteBed, clean) {
+  let recStream = stream, chain = null;
+  if (clean) {
+    try {
+      const ac = actx(); ac.resume();
+      const src = ac.createMediaStreamSource(stream), hp = ac.createBiquadFilter(), pres = ac.createBiquadFilter(), comp = ac.createDynamicsCompressor(), mk = ac.createGain(), dest = ac.createMediaStreamDestination();
+      hp.type = 'highpass'; hp.frequency.value = 85; hp.Q.value = .7;
+      pres.type = 'peaking'; pres.frequency.value = 3200; pres.Q.value = .9; pres.gain.value = 2.5;
+      comp.threshold.value = -26; comp.knee.value = 18; comp.ratio.value = 3.5; comp.attack.value = .004; comp.release.value = .22; mk.gain.value = 1.5;
+      src.connect(hp); hp.connect(pres); pres.connect(comp); comp.connect(mk); mk.connect(dest);
+      recStream = dest.stream; chain = [src, hp, pres, comp, mk];
+    } catch (e) { recStream = stream; chain = null; }
+  }
   const types = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm'], mime = types.find(t => window.MediaRecorder && MediaRecorder.isTypeSupported(t)) || '';
-  const mr = new MediaRecorder(stream, mime ? { mimeType: mime } : {}), chunks = [];
+  const mr = new MediaRecorder(recStream, mime ? { mimeType: mime } : {}), chunks = [];
   mr.ondataavailable = e => e.data.size && chunks.push(e.data);
-  recording = { mr, stream, chunks, start: T, t0: performance.now(), muteBed, timer: 0, mime: mr.mimeType || mime || 'audio/webm' };
-  recording.timer = setInterval(() => { const el = $('#recTime'); if (el) el.textContent = fmt((performance.now() - recording.t0) / 1000); }, 100);
+  recording = { mr, stream, chunks, start: T, t0: performance.now(), muteBed, clean, chain, timer: 0, mime: mr.mimeType || mime || 'audio/webm' };
+  const el = $('#recTime'); if (el) el.classList.remove('cd', 'pop');
+  recording.timer = setInterval(() => { const e2 = $('#recTime'); if (e2 && recording) e2.textContent = fmt((performance.now() - recording.t0) / 1000); }, 100);
   mr.start(250);
   const b = $('#recBtn'); if (b) { b.classList.add('on'); b.setAttribute('aria-label', 'Stop recording'); }
   if (duration() - T > 0.2) play();
@@ -2133,14 +2302,48 @@ function stopVoice() {
   const dur = (performance.now() - r.t0) / 1000;
   r.mr.onstop = async () => {
     r.stream.getTracks().forEach(t => t.stop());
+    if (r.chain) r.chain.forEach(n => { try { n.disconnect(); } catch (e) { /* already gone */ } });
     await sleep(150); restoreAudio();
-    if (dur < 0.3) { toast('Recording too short'); return; }
-    const m = await addMediaRecord('audio', 'Voiceover', new Blob(r.chunks, { type: r.mime.split(';')[0] }), dur);
-    const a = addAudioItem(m, 'voice', r.start); a.out = m.duration;
-    closeSheet(); commit(); select({ type: 'au', id: a.id }); toast(`Voiceover added (${dur.toFixed(1)}s)`);
+    if (dur < 0.3) { toast('Recording too short'); showTake(); return; }
+    let blob = new Blob(r.chunks, { type: r.mime.split(';')[0] });
+    if (r.clean) blob = (await cleanVoice(blob)) || blob;
+    const m = await addMediaRecord('audio', 'Voiceover', blob, dur);
+    const a = addAudioItem(m, 'voice', r.start); a.out = m.duration; a._pending = true;
+    take = { a, m }; renderTimeline(); seekTo(r.start);
+    if ($('#sheet').hidden || !$('#recRev')) keepTake(true); else showTake();
   };
   r.mr.stop();
-  const b = $('#recBtn'); if (b) b.classList.remove('on');
+  const b = $('#recBtn'); if (b) { b.classList.remove('on'); b.setAttribute('aria-label', 'Start recording'); }
+}
+// Learns the room noise from the quiet moments of the take and removes it, then brings the level up.
+async function cleanVoice(blob) {
+  busy.show('Cleaning your voice', 'Removing background noise'); cancelFlag = false;
+  try {
+    const buf = await new OfflineAudioContext(1, 1, 48000).decodeAudioData(await blob.arrayBuffer());
+    const n = buf.length, chs = buf.numberOfChannels, x = new Float32Array(n);
+    for (let c = 0; c < chs; c++) { const d = buf.getChannelData(c); for (let i = 0; i < n; i++) x[i] += d[i] / chs; }
+    const y = await denoiseSignal(x, 0, p => busy.pct(p * .95)); if (!y) return null;
+    let pk = 0; for (let i = 0; i < y.length; i++) pk = Math.max(pk, Math.abs(y[i]));
+    const g = pk > 1e-4 ? Math.min(4, .89 / pk) : 1; for (let i = 0; i < y.length; i++) y[i] *= g;
+    return wavBlob(y, buf.sampleRate);
+  } catch (e) { return null; } finally { busy.hide(); }
+}
+function showTake() {
+  const on = !!take, rev = $('#recRev'), opts = $('#recOpts'), b = $('#recBtn'), el = $('#recTime');
+  if (rev) rev.hidden = !on; if (opts) opts.hidden = on; if (b) b.hidden = on;
+  if (el) { el.classList.remove('cd', 'pop'); el.textContent = on ? `Take ready · ${fmtS(auLen(take.a))}` : '0:00.0'; }
+}
+function keepTake(silent) {
+  const t = take; if (!t) return; take = null; delete t.a._pending;
+  sel = { type: 'au', id: t.a.id }; commit();
+  if (!silent) closeSheet();
+  renderTimeline(); renderToolbar(); toast(`Voiceover added (${fmtS(auLen(t.a))})`);
+}
+function discardTake() {
+  const t = take; if (!t) return; take = null; if (playing) pause();
+  P.audio = P.audio.filter(a => a !== t.a); dropEl(t.a.id);
+  delMediaRec(t.m.id).catch(() => {}); if (media[t.m.id]) { URL.revokeObjectURL(media[t.m.id].url); delete media[t.m.id]; }
+  renderTimeline(); seekTo(t.a.start);
 }
 
 // After using the microphone, put the phone back into normal media sound and rebuild the audio engine and players,
@@ -2170,7 +2373,8 @@ function textSheet(o, fresh) {
   openSheet(o.caption ? (fresh ? 'Add caption' : 'Edit caption') : fresh ? 'Add text' : 'Edit text', `<textarea class="txt" id="txIn" aria-label="Text">${esc(o.text)}</textarea>
     <div class="lab">Font</div>${chipRow('font', FONTS, o.font, true)}
     <div class="lab">Colour</div><div class="swatches" id="txCol">${COLORS.map(c => `<button type="button" class="swatch" style="background:${c}" data-c="${c}" aria-label="${c}" aria-pressed="${c === o.color}"></button>`).join('')}</div>
-    <div class="chips" id="txSty">${[['stroke', 'Outline'], ['box', 'Label box'], ['glow', 'Neon glow'], ['shadow', 'Shadow']].map(([k, n]) => `<button type="button" class="chip" data-s="${k}" aria-pressed="${!!o[k]}">${n}</button>`).join('')}</div>
+    <div class="chips" id="txSty">${[['stroke', 'Outline'], ['box', 'Label box'], ['glow', 'Neon glow'], ['shadow', 'Shadow'], ['depth', '3D depth']].map(([k, n]) => `<button type="button" class="chip" data-s="${k}" aria-pressed="${!!o[k]}">${n}</button>`).join('')}</div>
+    <div class="lab">Gradient</div><div class="swatches" id="txGr"><button type="button" class="swatch" style="background:linear-gradient(135deg,#3a3a3a 50%,#777 50%)" data-g="" aria-label="No gradient" aria-pressed="${!o.grad}"></button>${Object.keys(GRADS).map(g => `<button type="button" class="swatch" style="background:${gradCss(g)}" data-g="${g}" aria-label="${g} gradient" aria-pressed="${o.grad === g}"></button>`).join('')}</div>
     <div class="lab">Box colour</div><div class="swatches" id="txBox">${['', '#000000', '#ffffff', '#e11d2e', '#0b3d91', '#ffd23f', '#36d7ff', '#ff5a87'].map(c => `<button type="button" class="swatch" style="background:${c || 'linear-gradient(135deg,#000 50%,#fff 50%)'}" data-c="${c}" aria-label="${c || 'Auto'}" aria-pressed="${(o.boxColor || '') === c}"></button>`).join('')}</div>
     ${o.auto ? `<p class="note">${esc(AUTO_TEXTS[o.auto] ? AUTO_TEXTS[o.auto][0] : 'Auto text')}: # in the text is replaced by the ${o.auto === 'counter' || o.auto === 'countdown' ? 'number' : 'time'}. Make the text longer on the timeline to ${o.auto === 'countdown' ? 'count down from a higher number' : 'let it run longer'}.</p>` : ''}
     ${o.auto === 'counter' ? `<div class="row"><label for="txTo">Count up to</label><input class="inp" id="txTo" type="number" inputmode="numeric" min="0" step="1" value="${+o.autoTo || 0}"></div>` : ''}
@@ -2183,7 +2387,8 @@ function textSheet(o, fresh) {
     ta.addEventListener('change', commit);
     if (fresh) setTimeout(() => { ta.focus(); ta.select(); }, 150);
     bindChips(r, 'font', v => { o.font = v; commit(); });
-    $('#txCol', r).onclick = e => { const b = e.target.closest('[data-c]'); if (!b) return; o.color = b.dataset.c; $$('#txCol [data-c]', r).forEach(x => x.setAttribute('aria-pressed', String(x === b))); commit(); };
+    $('#txCol', r).onclick = e => { const b = e.target.closest('[data-c]'); if (!b) return; o.color = b.dataset.c; o.grad = null; $$('#txGr [data-g]', r).forEach(x => x.setAttribute('aria-pressed', String(!x.dataset.g))); $$('#txCol [data-c]', r).forEach(x => x.setAttribute('aria-pressed', String(x === b))); commit(); };
+    $('#txGr', r).onclick = e => { const b = e.target.closest('[data-g]'); if (!b) return; o.grad = b.dataset.g || null; $$('#txGr [data-g]', r).forEach(x => x.setAttribute('aria-pressed', String(x === b))); commit(); };
     $('#txBox', r).onclick = e => { const b = e.target.closest('[data-c]'); if (!b) return; o.boxColor = b.dataset.c || null; if (b.dataset.c) o.box = true; $$('#txBox [data-c]', r).forEach(x => x.setAttribute('aria-pressed', String(x === b))); commit(); };
     $('#txSty', r).onclick = e => { const b = e.target.closest('[data-s]'); if (!b) return; o[b.dataset.s] = !o[b.dataset.s]; b.setAttribute('aria-pressed', String(o[b.dataset.s])); commit(); };
     bindSlider(r, 'txSz', v => v.toFixed(1), v => { o.size = v; });
@@ -2228,19 +2433,60 @@ function adjustSheet(it) {
   });
 }
 function setFx(it, k, v) { it.fx = it.fx || {}; if (v > 0) it.fx[k] = +v.toFixed(2); else delete it.fx[k]; }
+/* Effects: every effect has a small sample made from the clip's own picture. Tap one to switch it on and see it on
+   the preview; tap it again to take it off. */
 function effectsSheet(it) {
-  let cur = Object.keys(it.fx || {})[0] || 'vhs';
-  const list = () => `<div class="fxlist" id="fxg">${Object.entries(FX).map(([k, n]) => `<button type="button" class="fxrow${it.fx && it.fx[k] ? ' on' : ''}" data-fx="${k}" aria-pressed="${k === cur}"><span>${n}</span><i class="dot"></i></button>`).join('')}</div>`;
-  openSheet('Effects', `<div id="fxCtl"></div><div id="fxWrap">${list()}</div><p class="note">Stack as many effects as you like. Beat pulse and Beat strobe follow the music when Beat sync has run.</p>`, r => {
-    const bindList = () => { $('#fxg', r).onclick = e => { const b = e.target.closest('[data-fx]'); if (!b) return; cur = b.dataset.fx; $$('[data-fx]', r).forEach(x => x.setAttribute('aria-pressed', String(x === b))); ctl(); }; };
+  const keys = Object.keys(FX).filter(k => k !== 'beauty');
+  let cur = Object.keys(it.fx || {}).find(k => FX[k] && k !== 'beauty') || null;
+  openSheet('Effects', `<div id="fxCtl"></div><div class="fxgrid" id="fxg">${keys.map(k => `<button type="button" class="fxt${it.fx && it.fx[k] ? ' on' : ''}" data-fx="${k}"><canvas width="72" height="96"></canvas><span>${FX[k]}</span></button>`).join('')}</div>
+    <p class="note">Tap an effect to see it on your video, tap it again to take it off. Stack as many as you like. Beat pulse and Beat strobe follow the music once Beat sync has run.</p>`,
+  r => {
+    const base = fxBase(it);
+    keys.forEach(k => fxTile(k, base, $(`[data-fx="${k}"] canvas`, r)));
+    requestDraw();
     const ctl = () => {
-      const on = !!(it.fx && it.fx[cur]);
-      $('#fxCtl', r).innerHTML = `<div class="row"><label style="color:var(--text);font-size:14px">${FX[cur]}</label><button type="button" class="btn sm ${on ? 'danger' : 'main'}" id="fxOn" style="margin-left:auto">${on ? 'Remove' : 'Apply'}</button></div>${on ? slider('fxI', 'Intensity', .05, 1, .01, it.fx[cur], pct) : ''}`;
-      $('#fxOn', r).onclick = () => { setFx(it, cur, on ? 0 : .6); commit(); $('#fxWrap', r).innerHTML = list(); bindList(); ctl(); if (!on) previewAt(it, 1.2); };
+      $('#fxCtl', r).innerHTML = cur && it.fx && it.fx[cur] ? slider('fxI', FX[cur] + ' strength', .05, 1, .01, it.fx[cur], pct) : '<p class="note" style="margin:0">Tap an effect below to try it on your video.</p>';
       bindSlider(r, 'fxI', pct, v => setFx(it, cur, v));
     };
-    bindList(); ctl();
+    $('#fxg', r).onclick = e => {
+      const b = e.target.closest('[data-fx]'); if (!b) return;
+      const k = b.dataset.fx, on = !!(it.fx && it.fx[k]);
+      setFx(it, k, on ? 0 : .7); b.classList.toggle('on', !on);
+      cur = on ? Object.keys(it.fx).find(x => FX[x] && x !== 'beauty') || null : k;
+      ctl(); commit();
+      if (!on) previewHere(it, 1.6); else requestDraw();
+    };
+    ctl();
   });
+}
+// Plays a moment of the item from the playhead (or from its start when the playhead is elsewhere).
+function previewHere(it, sec) {
+  layout(); const s = it._start != null ? it._start : it.start, e = s + (it.end != null && it.type ? it.end - it.start : clipLen(it));
+  if (T < s || T > e - .3) seekTo(s + .01);
+  play(); setTimeout(() => { if (playing) pause(); }, sec * 1000);
+}
+// The item's current frame without its effects, small, for the effect samples.
+function fxBase(it) {
+  const keepFx = it.fx, keepSel = sel; it.fx = {}; sel = null;
+  try { draw(); } finally { it.fx = keepFx; sel = keepSel; }
+  const b = C(72, 96), x = ctx2d(b), k = Math.max(72 / cv.width, 96 / cv.height);
+  x.drawImage(cv, (72 - cv.width * k) / 2, (96 - cv.height * k) / 2, cv.width * k, cv.height * k);
+  return b;
+}
+function fxTile(k, base, out) {
+  if (!out) return;
+  const w = base.width, h = base.height; sizeCanvas(workC, w, h);
+  wg.setTransform(1, 0, 0, 1, 0, 0); wg.globalAlpha = 1; wg.globalCompositeOperation = 'source-over'; wg.filter = 'none'; wg.clearRect(0, 0, w, h);
+  const pre = { hue: 'hue-rotate(120deg) saturate(1.4)', blur: 'blur(2px)', beauty: 'blur(1px) brightness(1.08)' }[k];
+  if (pre) wg.filter = pre;
+  if (k === 'shake') { wg.save(); wg.translate(w / 2 + 3, h / 2 - 2); wg.rotate(.06); wg.drawImage(base, -w / 2, -h / 2); wg.restore(); wg.globalAlpha = .35; wg.drawImage(base, -4, 2); wg.globalAlpha = 1; }
+  else if (k === 'pulse') { wg.drawImage(base, -w * .06, -h * .06, w * 1.12, h * 1.12); }
+  else if (k === 'motionblur') { for (let i = 0; i < 4; i++) { wg.globalAlpha = i ? .3 : 1; wg.drawImage(base, i * 3, 0); } wg.globalAlpha = 1; }
+  else wg.drawImage(base, 0, 0);
+  wg.filter = 'none';
+  if (k === 'strobe') { wg.fillStyle = 'rgba(255,255,255,.55)'; wg.fillRect(0, 0, w, h); }
+  else frameFx({ fx: { [k]: .75 } }, 2.7, w, h, true);
+  const x = ctx2d(out); x.clearRect(0, 0, out.width, out.height); x.drawImage(workC, 0, 0, out.width, out.height);
 }
 const SPEEDS = [0.1, 0.25, 0.5, 1, 1.5, 2, 3, 5, 10];
 const spChips = (attr, cur) => `<div class="chips" data-${attr}>${SPEEDS.map(v => `<button type="button" class="chip" data-v="${v}" aria-pressed="${v === cur}">${v}×</button>`).join('')}</div>`;
@@ -2340,18 +2586,93 @@ function transformSheet(it) {
   };
   openSheet('Transform & keyframes', '', render);
 }
+/* Crop cuts parts of the picture away: what is outside the box disappears and the rest keeps its size and place.
+   Resize (its own tool) makes the whole picture bigger or smaller. */
 function cropSheet(it) {
-  const m = media[it.mediaId], cur = it.crop || { l: 0, t: 0, r: 0, b: 0 };
-  openSheet('Crop', chipRow('cr', { free: 'Free', '9:16': '9:16', '16:9': '16:9', '1:1': '1:1', '4:5': '4:5', '3:4': '3:4' }, 'free') + slider('cl', 'Left', 0, .45, .005, cur.l, pct) + slider('crr', 'Right', 0, .45, .005, cur.r, pct) + slider('ct', 'Top', 0, .45, .005, cur.t, pct) + slider('cb', 'Bottom', 0, .45, .005, cur.b, pct) + '<button type="button" class="btn" id="crR">Reset crop</button>',
+  const m = media[it.mediaId], mw = m.w || 16, mh = m.h || 9;
+  let lock = null; // width / height of a fixed shape, or null for free
+  const cur = () => Object.assign({ l: 0, t: 0, r: 0, b: 0 }, it.crop || {});
+  openSheet('Crop', `<div class="crop-ed"><canvas id="crCv"></canvas></div>${chipRow('cr', { free: 'Free', '9:16': '9:16', '16:9': '16:9', '1:1': '1:1', '4:5': '4:5', '3:4': '3:4' }, 'free')}
+    <div class="kfbar"><button type="button" class="btn" id="crR">Reset crop</button></div>
+    <p class="note">Drag the corners or sides to cut parts away, or drag inside the box to move it. Everything outside the box is removed; the rest keeps its size and place. To make the clip bigger or smaller, use Resize.</p>`,
   r => {
-    const set = (k, v) => { it.crop = Object.assign({ l: 0, t: 0, r: 0, b: 0 }, it.crop || {}); it.crop[k] = v; if (!it.crop.l && !it.crop.t && !it.crop.r && !it.crop.b) it.crop = null; };
-    bindSlider(r, 'cl', pct, v => set('l', v)); bindSlider(r, 'crr', pct, v => set('r', v)); bindSlider(r, 'ct', pct, v => set('t', v)); bindSlider(r, 'cb', pct, v => set('b', v));
-    bindChips(r, 'cr', v => {
-      if (v === 'free') return; const [a, b] = RATIOS[v], mw = m.w || 16, mh = m.h || 9, target = a / b, ar = mw / mh;
-      if (ar > target) { const keep = target / ar; it.crop = { l: (1 - keep) / 2, r: (1 - keep) / 2, t: 0, b: 0 }; } else { const keep = ar / target; it.crop = { t: (1 - keep) / 2, b: (1 - keep) / 2, l: 0, r: 0 }; }
-      commit(); cropSheet(it);
+    const cvs = $('#crCv', r); let thumb = null, box = null, drag = null;
+    if (m.thumb) { thumb = new Image(); thumb.src = picUrl(m.thumb); }
+    const setCrop = c => { const z = v => clamp(+v.toFixed(4), 0, .95); it.crop = { l: z(c.l), t: z(c.t), r: z(c.r), b: z(c.b) }; if (!it.crop.l && !it.crop.t && !it.crop.r && !it.crop.b) it.crop = null; requestDraw(); };
+    const edges = () => { const c = cur(), { bx, by, bw, bh } = box; return { L: bx + c.l * bw, T: by + c.t * bh, R: bx + bw - c.r * bw, B: by + bh - c.b * bh }; };
+    liveLoop(cvs, () => {
+      const { x, w, h } = gfx(cvs), k = Math.min((w - 28) / mw, (h - 28) / mh), bw = mw * k, bh = mh * k;
+      box = { bx: (w - bw) / 2, by: (h - bh) / 2, bw, bh };
+      x.fillStyle = '#0c0c0c'; x.fillRect(0, 0, w, h);
+      const e = els[it.id], src = m.kind === 'image' ? m.img : e && !e.img && e.el.readyState >= 2 ? e.el : thumb && thumb.complete ? thumb : null;
+      if (src) x.drawImage(src, box.bx, box.by, bw, bh); else { x.fillStyle = '#222'; x.fillRect(box.bx, box.by, bw, bh); }
+      const { L, T: Tp, R, B } = edges();
+      x.fillStyle = 'rgba(0,0,0,.66)';
+      x.fillRect(box.bx, box.by, bw, Tp - box.by); x.fillRect(box.bx, B, bw, box.by + bh - B); x.fillRect(box.bx, Tp, L - box.bx, B - Tp); x.fillRect(R, Tp, box.bx + bw - R, B - Tp);
+      x.strokeStyle = 'rgba(255,255,255,.35)'; x.lineWidth = 1; x.beginPath();
+      for (let i = 1; i < 3; i++) { const gx = L + (R - L) * i / 3, gy = Tp + (B - Tp) * i / 3; x.moveTo(gx, Tp); x.lineTo(gx, B); x.moveTo(L, gy); x.lineTo(R, gy); }
+      x.stroke(); x.strokeStyle = '#c9a45c'; x.lineWidth = 2; x.strokeRect(L, Tp, R - L, B - Tp);
+      x.fillStyle = '#fff';
+      for (const [px, py] of [[L, Tp], [R, Tp], [R, B], [L, B]]) { x.beginPath(); x.arc(px, py, 7, 0, 7); x.fill(); }
+      if (!lock) { x.fillRect((L + R) / 2 - 11, Tp - 2.5, 22, 5); x.fillRect((L + R) / 2 - 11, B - 2.5, 22, 5); x.fillRect(L - 2.5, (Tp + B) / 2 - 11, 5, 22); x.fillRect(R - 2.5, (Tp + B) / 2 - 11, 5, 22); }
     });
-    $('#crR', r).onclick = () => { it.crop = null; commit(); cropSheet(it); };
+    const at = ev => { const rc = cvs.getBoundingClientRect(); return { x: ev.clientX - rc.left, y: ev.clientY - rc.top }; };
+    cvs.addEventListener('pointerdown', ev => {
+      if (!box) return;
+      const p = at(ev), { L, T: Tp, R, B } = edges(), nr = (a, b) => Math.abs(a - b) < 22, inX = p.x > L - 22 && p.x < R + 22, inY = p.y > Tp - 22 && p.y < B + 22;
+      let h = '';
+      if (inX && nr(p.y, Tp)) h += 't'; else if (inX && nr(p.y, B)) h += 'b';
+      if (inY && nr(p.x, L)) h += 'l'; else if (inY && nr(p.x, R)) h += 'r';
+      if (!h && p.x > L && p.x < R && p.y > Tp && p.y < B) h = 'move';
+      if (!h) return;
+      if (lock && h.length === 1 && h !== 'move') h = { t: 'tr', b: 'br', l: 'bl', r: 'br' }[h];
+      drag = { h, p0: p, c0: cur() }; ev.preventDefault();
+      try { cvs.setPointerCapture(ev.pointerId); } catch (e) { /* pointer already gone */ }
+    });
+    cvs.addEventListener('pointermove', ev => {
+      if (!drag || !box) return;
+      const p = at(ev), dx = (p.x - drag.p0.x) / box.bw, dy = (p.y - drag.p0.y) / box.bh, c = { ...drag.c0 }, MIN = .08, h = drag.h;
+      if (h === 'move') {
+        const w = 1 - c.l - c.r, hh = 1 - c.t - c.b;
+        c.l = clamp(c.l + dx, 0, 1 - w); c.r = 1 - w - c.l; c.t = clamp(c.t + dy, 0, 1 - hh); c.b = 1 - hh - c.t;
+      } else {
+        if (h.includes('l')) c.l = clamp(c.l + dx, 0, 1 - c.r - MIN);
+        if (h.includes('r')) c.r = clamp(c.r - dx, 0, 1 - c.l - MIN);
+        if (h.includes('t')) c.t = clamp(c.t + dy, 0, 1 - c.b - MIN);
+        if (h.includes('b')) c.b = clamp(c.b - dy, 0, 1 - c.t - MIN);
+        if (lock) { // a fixed shape: the height follows the width
+          let wf = 1 - c.l - c.r, hf = wf * mw / lock / mh;
+          if (hf > 1) { hf = 1; wf = lock * mh / mw; if (h.includes('l')) c.l = clamp(1 - c.r - wf, 0, 1); else c.r = clamp(1 - c.l - wf, 0, 1); }
+          if (h.includes('t')) { c.t = 1 - c.b - hf; if (c.t < 0) { c.b += c.t; c.t = 0; } }
+          else { c.b = 1 - c.t - hf; if (c.b < 0) { c.t += c.b; c.b = 0; } }
+        }
+      }
+      setCrop(c);
+    });
+    const end = () => { if (drag) { drag = null; commit(); } };
+    cvs.addEventListener('pointerup', end); cvs.addEventListener('pointercancel', end);
+    bindChips(r, 'cr', v => {
+      if (v === 'free') { lock = null; return; }
+      const [a, b] = RATIOS[v], target = a / b, ar = mw / mh; lock = target;
+      if (ar > target) { const keep = target / ar; setCrop({ l: (1 - keep) / 2, r: (1 - keep) / 2, t: 0, b: 0 }); }
+      else { const keep = ar / target; setCrop({ t: (1 - keep) / 2, b: (1 - keep) / 2, l: 0, r: 0 }); }
+      commit();
+    });
+    $('#crR', r).onclick = () => { it.crop = null; lock = null; $$('[data-chips="cr"] [data-v]', r).forEach(x => x.setAttribute('aria-pressed', String(x.dataset.v === 'free'))); commit(); };
+  });
+}
+function resizeSheet(it) {
+  const L = () => localOf(it), now = tfAt(it, L()), pc = v => Math.round(v * 100) + '%';
+  openSheet('Resize', `${slider('rzS', 'Size', .1, 4, .01, now.s, pc)}${slider('rzW', 'Stretch width', .2, 3, .01, now.w || 1, pc)}${slider('rzH', 'Stretch height', .2, 3, .01, now.h || 1, pc)}
+    <div class="kfbar"><button type="button" class="btn" id="rzFit">Fit</button><button type="button" class="btn" id="rzFill">Fill</button><button type="button" class="btn" id="rzR">Reset size</button></div>
+    <p class="note">Resize makes the whole picture bigger or smaller without cutting anything. To cut parts away, use Crop. You can also pinch the clip on the preview.</p>`,
+  r => {
+    const st = k => v => setTf(it, { [k]: v }, L());
+    bindSlider(r, 'rzS', pc, st('s')); bindSlider(r, 'rzW', pc, st('w')); bindSlider(r, 'rzH', pc, st('h'));
+    const set = (fit, s) => { if (fit) it.fit = fit; setTf(it, { s, w: 1, h: 1 }, L()); commit(); resizeSheet(it); };
+    $('#rzFit', r).onclick = () => set('contain', 1);
+    $('#rzFill', r).onclick = () => set('cover', 1);
+    $('#rzR', r).onclick = () => set(null, sel && sel.type === 'layer' ? .55 : 1);
   });
 }
 function maskSheet(it) {
@@ -2471,7 +2792,7 @@ async function silenceCut(only) {
   for (const c of [...list]) {
     const m = media[c.mediaId]; busy.pct(i++ / list.length);
     if (hasCurve(c) || c.kind !== 'video') continue;
-    const buf = await decodeMedia(m); if (!buf) continue;
+    const buf = await decodeLite(m); if (!buf) continue;
     const win = 0.05, r = rmsWindows(buf, c.in, c.out, win); if (r.length < 10) continue;
     const thr = Math.max(pctl(r, 0.15) * 2.2, pctl(r, 0.95) * 0.1, 0.006), minSil = 0.5, padS = 0.1;
     const keep = []; let runStart = null;
@@ -2498,8 +2819,8 @@ async function silenceCut(only) {
 
 /* --- Beat sync --- */
 async function detectBeats(a) {
-  const m = media[a.mediaId]; const buf = await decodeMedia(m); if (!buf) return null;
-  const sr = buf.sampleRate, hop = 512, fps = sr / hop, d0 = buf.getChannelData(0), d1 = buf.numberOfChannels > 1 ? buf.getChannelData(1) : d0;
+  const m = media[a.mediaId]; const buf = await decodeLite(m); if (!buf) return null;
+  const sr = buf.sampleRate, hop = sr < 20000 ? 256 : 512, fps = sr / hop, d0 = buf.getChannelData(0), d1 = buf.numberOfChannels > 1 ? buf.getChannelData(1) : d0;
   const from = Math.floor(a.in * sr), to = Math.min(buf.length, Math.floor(a.out * sr)), n = Math.floor((to - from) / hop);
   if (n < fps * 3) return null;
   const e = new Float32Array(n);
@@ -2852,10 +3173,41 @@ async function runTrack(o) {
 
 /* --- Auto reel (highlights) --- */
 /* --- Auto edit: the reel is cut on the beat of the music, then finished like a pro edit --- */
+/* Auto edit styles. Each has pools of transitions, cut sounds, accent effects, loops and entrances; the edit picks
+   from them so cuts vary, and only some cuts get a transition. cut = cut lengths in beats, rate = share of cuts with
+   a transition, music = which composed track fits. */
 const REEL_STYLES = {
-  energetic: { name: 'Energetic', bpm: 124, beatsPerCut: 2, filter: 'vivid', trans: ['zoom', 'whip', 'flash', 'glitch', 'slide', 'shake'], fx: { pulse: .35 }, combo: 'none', first: 'zoomin', title: { font: 'black', size: 10, color: '#ffffff', stroke: true, anim: 'pop' }, sub: { font: 'cond', size: 4, color: '#ffd23f', anim: 'slide' }, endAnim: 'zoom', sfx: 'whoosh' },
-  cinematic: { name: 'Cinematic', bpm: 90, beatsPerCut: 4, filter: 'teal', trans: ['fade', 'blur', 'zoomout', 'fade'], fx: { letterbox: .55, grain: .18 }, combo: 'kenburns', first: 'fade', title: { font: 'serif', size: 7, color: '#ffffff', shadow: true, spacing: 18, anim: 'fade' }, sub: { font: 'light', size: 3.4, color: '#e0c287', spacing: 30, anim: 'fade' }, endAnim: 'fade', sfx: 'riser' },
-  chill: { name: 'Chill', bpm: 84, beatsPerCut: 4, filter: 'dream', trans: ['fade', 'slide', 'blur', 'slideup'], fx: { lightleak: .25 }, combo: 'zoomslow', first: 'rise', title: { font: 'hand', size: 9, color: '#ffffff', shadow: true, anim: 'type' }, sub: { font: 'classic', size: 3.6, color: '#ffffff', anim: 'fade' }, endAnim: 'fade', sfx: 'swipe' }
+  energetic: { name: 'Energetic', bpm: 124, music: 'energetic', cut: [2, 1, 2, 4, 1, 2], rate: .6, filter: 'vivid',
+    trans: ['zoom', 'whip', 'zoomspin', 'pushl', 'glitch', 'flash', 'rgbsplit', 'cube', 'jolt', 'warp', 'strips', 'flashgold', 'flip3d'],
+    sfx: ['whooshfast', 'swish', 'trhit', 'glitchswipe', 'whoosh', 'swipe', 'punch', 'swoopup'], fx: { pulse: .3 }, accent: ['shake', 'rgb', 'zoomblur', 'glow', 'strobe'],
+    combos: ['none', 'zoomslow', 'pulse', 'none', 'kenburns', 'zoompulse'], ins: ['zoomin', 'pop', 'elastic', 'flip3d', 'whip', 'zoomwhip'], first: 'zoomwhip',
+    title: { font: 'black', size: 10, color: '#ffffff', stroke: true, anim: 'stamp' }, sub: { font: 'cond', size: 4, color: '#ffd23f', anim: 'slidel' }, endAnim: 'elastic', titleSfx: 'cinehit' },
+  cinematic: { name: 'Cinematic', bpm: 90, music: 'cinematic', cut: [4, 2, 4, 4], rate: .5, filter: 'cool',
+    trans: ['fade', 'blur', 'defocus', 'leak', 'zoomout', 'dolly', 'filmburn', 'doorsh', 'flare', 'fold'],
+    sfx: ['whooshdeep', 'whoosh2', 'airswoosh', 'risershort', 'downlifter', 'braam'], fx: { letterbox: .55, grain: .18 }, accent: ['bloom', 'lightleak', 'dreamy'],
+    combos: ['kenburns', 'zoomslow', 'zoomoutslow', 'kenburns', 'parallax'], ins: ['fade', 'cinematic', 'blur', 'floatin'], first: 'cinematic',
+    title: { font: 'light', size: 7, color: '#ffffff', shadow: true, spacing: 40, anim: 'trackin' }, sub: { font: 'light', size: 3.4, color: '#e0c287', spacing: 30, anim: 'fadeletters' }, endAnim: 'blurin', titleSfx: 'braam' },
+  chill: { name: 'Chill', bpm: 84, music: 'chill', cut: [4, 2, 4], rate: .45, filter: 'dream',
+    trans: ['fade', 'slide', 'leak', 'pushu', 'blur', 'flip3d', 'fold', 'bloomflash'], sfx: ['whoosh2', 'airswoosh', 'paper', 'shimmer'],
+    fx: { lightleak: .2 }, accent: ['dreamy', 'bokeh', 'sparkle'], combos: ['zoomslow', 'float', 'breathe', 'zoomoutslow', 'float3d'], ins: ['rise', 'fade', 'unfold', 'floatin'], first: 'rise',
+    title: { font: 'hand', size: 9, color: '#ffffff', shadow: true, anim: 'type' }, sub: { font: 'classic', size: 3.6, color: '#ffffff', anim: 'fade' }, endAnim: 'fadeletters', titleSfx: 'chime' },
+  hype: { name: 'Hype / sport', bpm: 140, music: 'energetic', cut: [1, 2, 1, 1, 2], rate: .7, filter: 'pop',
+    trans: ['quake', 'zoomspin', 'shatter', 'flashgold', 'rgbsplit', 'scanglitch', 'cube', 'jolt', 'spin360', 'strips', 'stretch'],
+    sfx: ['trhit', 'punch', 'glitchswipe', 'whooshfast', 'boom', 'zap', 'flashhit'], fx: { pulse: .4 }, accent: ['shake', 'strobe', 'rgb', 'zoomblur', 'popart'],
+    combos: ['none', 'zoompulse', 'shakehard', 'zoomslow'], ins: ['zoomwhip', 'flipspin', 'glitchin', 'poprot', 'elastic'], first: 'glitchin',
+    title: { font: 'black', size: 11, color: '#ff7a00', grad: 'fire', depth: .9, stroke: false, anim: 'stamp' }, sub: { font: 'cond', size: 4, color: '#ffffff', anim: 'slider' }, endAnim: 'zoom3d', titleSfx: 'boom' },
+  vlog: { name: 'Vlog', bpm: 104, music: 'chill', cut: [2, 2, 4], rate: .5, filter: 'warm',
+    trans: ['slide', 'pushl', 'pushr', 'zoom', 'fade', 'whip', 'pushu', 'cube', 'circle'], sfx: ['swipe', 'whoosh', 'paper', 'pop', 'whooshfast'],
+    fx: {}, accent: ['lightleak', 'vignette'], combos: ['kenburns', 'none', 'zoomslow', 'driftl'], ins: ['slidebounce', 'pop', 'zoomin', 'rise'], first: 'pop',
+    title: { font: 'black', size: 8, color: '#111111', box: true, boxColor: '#ffd23f', stroke: false, anim: 'elastic' }, sub: { font: 'classic', size: 3.8, color: '#ffffff', shadow: true, anim: 'riseup' }, endAnim: 'cascade', titleSfx: 'pop' },
+  retro: { name: 'Retro', bpm: 110, music: 'energetic', cut: [2, 4, 2], rate: .55, filter: 'vintage',
+    trans: ['rewind', 'scanglitch', 'vblinds', 'pixel', 'flash', 'checker', 'ripple', 'mosaic'], sfx: ['rewindfx', 'staticfx', 'tapestop', 'glitch', 'stutter'],
+    fx: { vhs: .45, grain: .3 }, accent: ['scratches', 'dust', 'oldfilm', 'scanlines'], combos: ['none', 'jitter', 'zoomslow', 'glitchloop'], ins: ['flicker', 'shutter', 'glitchin'], first: 'flicker',
+    title: { font: 'black', size: 9, color: '#ff4ecd', grad: 'neon', depth: 1, stroke: false, anim: 'roll3d' }, sub: { font: 'mono', size: 3.6, color: '#ffffff', anim: 'typepop' }, endAnim: 'glitch2', titleSfx: 'rewindfx' },
+  luxury: { name: 'Luxury', bpm: 92, music: 'cinematic', cut: [4, 4, 2], rate: .45, filter: 'matte',
+    trans: ['fade', 'leak', 'flare', 'dolly', 'fold', 'flipv3d', 'diamond', 'bloomflash'], sfx: ['shimmer', 'whoosh2', 'airswoosh', 'chime'],
+    fx: { letterbox: .35 }, accent: ['bloom', 'sparkle', 'dreamy'], combos: ['kenburns', 'zoomslow', 'zoomoutslow', 'pushinloop'], ins: ['fade', 'cinematic', 'unfold', 'flipv3d'], first: 'cinematic',
+    title: { font: 'light', size: 8, color: '#e2b33c', grad: 'gold', shadow: true, spacing: 50, anim: 'trackin' }, sub: { font: 'serif', size: 3.6, color: '#f1ede6', anim: 'fadeletters' }, endAnim: 'blurin', titleSfx: 'shimmer' }
 };
 function reelSheet() {
   const vids = P.clips.filter(c => c.kind === 'video' && !hasCurve(c));
@@ -2863,16 +3215,16 @@ function reelSheet() {
   const hasMusic = P.audio.some(a => a.kind === 'music');
   const o = { style: 'energetic', len: 30, music: true, titles: true, trans: true, sfx: true, grade: true, title: (P.name || '').startsWith('Project ') ? 'HIGHLIGHTS' : P.name, sub: new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' }) };
   openSheet('Auto edit', `<div class="lab">Style</div>${chipRow('rs', Object.fromEntries(Object.entries(REEL_STYLES).map(([k, v]) => [k, v.name])), o.style)}
-    <div class="lab">Length</div>${chipRow('rl', { 15: '15 s', 30: '30 s', 60: '60 s' }, o.len)}
+    <div class="lab">Length</div>${chipRow('rl', { 15: '15 s', 30: '30 s', 60: '60 s', 90: '90 s' }, o.len)}
     <div class="row"><label for="rTitle">Title</label><input class="inp" id="rTitle" maxlength="40" value="${esc(o.title)}"></div>
     <div class="row"><label for="rSub">Subtitle</label><input class="inp" id="rSub" maxlength="50" value="${esc(o.sub)}"></div>
     ${toggleRow('rMu', hasMusic ? 'Use your music' : 'Add music', hasMusic ? 'Cuts land on the beat of your song' : 'A matching track is composed on your phone and cuts land on its beat', o.music)}
     ${toggleRow('rTi', 'Title and end card', 'Animated opening title and a closing card', o.titles)}
-    ${toggleRow('rTr', 'Transitions', 'A different transition on every cut to match the style', o.trans)}
-    ${toggleRow('rGr', 'Colour grade and effects', 'A film look that fits the style', o.grade)}
-    ${toggleRow('rSf', 'Sound effects', 'Whooshes under the transitions', o.sfx)}
+    ${toggleRow('rTr', 'Transitions', 'Different transitions on some cuts, chosen to fit the style', o.trans)}
+    ${toggleRow('rGr', 'Look, effects and motion', 'A colour grade, accent effects on the best moments and gentle camera moves', o.grade)}
+    ${toggleRow('rSf', 'Sound effects', 'A different sound under each transition', o.sfx)}
     <button type="button" class="btn ai full" id="rGo">Make the edit</button>
-    <p class="note">Your clips are not deleted: Undo brings your full edit back.</p>`,
+    <p class="note">Your clips are not deleted: Undo brings your full edit back. Long videos are scanned in small steps so the phone does not run out of memory.</p>`,
   r => {
     bindChips(r, 'rs', v => { o.style = v; }); bindChips(r, 'rl', v => { o.len = +v; });
     bindToggle(r, 'rMu', v => { o.music = v; }); bindToggle(r, 'rTi', v => { o.titles = v; }); bindToggle(r, 'rTr', v => { o.trans = v; }); bindToggle(r, 'rGr', v => { o.grade = v; }); bindToggle(r, 'rSf', v => { o.sfx = v; });
@@ -2881,7 +3233,7 @@ function reelSheet() {
 }
 // Composes a short music bed (drums, bass, chords) in the chosen style, so the auto edit needs no download.
 async function renderMusic(style, dur) {
-  const S = REEL_STYLES[style], beat = 60 / S.bpm, sr = 44100, oc = new OfflineAudioContext(1, Math.ceil(sr * dur), sr);
+  const S = REEL_STYLES[style] || REEL_STYLES.energetic, g = S.music || style, beat = 60 / S.bpm, sr = 44100, oc = new OfflineAudioContext(1, Math.ceil(sr * dur), sr);
   const comp = oc.createDynamicsCompressor(); comp.threshold.value = -16; comp.ratio.value = 4; comp.connect(oc.destination);
   const bus = oc.createGain(); bus.gain.value = .9; bus.connect(comp);
   const nb = oc.createBuffer(1, sr, sr), nd = nb.getChannelData(0); for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
@@ -2896,14 +3248,14 @@ async function renderMusic(style, dur) {
   for (let i = 0; i < n; i++) {
     const t = i * beat, bar = Math.floor(i / 4), inBar = i % 4, ch = prog[bar % 4], intro = i < 4, outro = t > dur - beat * 4;
     beats.push(+t.toFixed(3));
-    if (style === 'energetic') {
+    if (g === 'energetic') {
       if (!intro) kick(t, .95);
       if (!intro && inBar % 2 === 1) { noise(t, 'bandpass', 1900, .55, .16, .9); tone(t, 'triangle', 50, .25, .002, .1, 2000); }
       noise(t + beat / 2, 'highpass', 7500, .22, .05);
       if (!intro) for (let k = 0; k < 2; k++) tone(t + k * beat / 2, 'sawtooth', ch[0] - 24, .22, .005, beat / 2 - .04, 520);
       for (let k = 0; k < 4; k++) tone(t + k * beat / 4, 'square', ch[k % 3] + 12, .045, .003, beat / 4, 2600);
       if (inBar === 0) ch.forEach(m => tone(t, 'sawtooth', m, .05, .08, beat * 3.6, 1400));
-    } else if (style === 'cinematic') {
+    } else if (g === 'cinematic') {
       if (inBar === 0 && !intro) { kick(t, 1.1); noise(t, 'lowpass', 300, .5, .9); }
       if (inBar === 2 && !intro) noise(t, 'bandpass', 900, .25, .5, .6);
       if (inBar === 0) { ch.forEach(m => tone(t, 'sawtooth', m, .06, beat * 1.2, beat * 3, 900)); tone(t, 'sine', ch[0] - 24, .35, .05, beat * 3.6, 300); }
@@ -2923,72 +3275,138 @@ async function sfxItem(k, at, vol) {
   if (!m) { const buf = await renderSfx(k); m = await addMediaRecord('audio', SFX[k][0], wavBlob(buf.getChannelData(0), buf.sampleRate), buf.duration); sfxMedia[k] = m.id; }
   const a = addAudioItem(m, 'sfx', Math.max(0, at)); a.out = m.duration; a.volume = vol; return a;
 }
+// Sound for analysis only (loudness, pauses, beats): one channel at a low rate, about a tenth of the memory of a full
+// decode. Files too big to open in memory on a phone are skipped and the picture alone is used.
+const LITE_MAX = 200 * 1048576;
+async function decodeLite(m) {
+  if (!m || m.kind === 'image' || !m.blob || m.blob.size > LITE_MAX) return null;
+  if (m.lite !== undefined) { keepLite(m); return m.lite; }
+  if (!m.liteJob) m.liteJob = (async () => {
+    try { m.lite = await new OfflineAudioContext(1, 1, 11025).decodeAudioData(await m.blob.arrayBuffer()); } catch (e) { m.lite = null; }
+    m.liteJob = null; keepLite(m); return m.lite;
+  })();
+  return m.liteJob;
+}
+function keepLite(m) { clearTimeout(m.liteT); m.liteT = setTimeout(() => { if (!m.liteJob) m.lite = undefined; }, 30000); }
+function seeded(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 async function autoReel(o) {
-  const S = REEL_STYLES[o.style], target = o.len;
+  const S = REEL_STYLES[o.style] || REEL_STYLES.energetic;
   const vids = P.clips.filter(c => c.kind === 'video' && !hasCurve(c));
-  if (!vids.length) { toast('Auto reel needs video clips'); return; }
+  if (!vids.length) { toast('Auto edit needs video clips'); return; }
+  const snap = JSON.stringify(clean(P));
   cancellable('Auto edit', 'Finding the best moments');
-  // The beat decides how long each cut is: the user's song if there is one, otherwise the composed track.
+  resumeTask = { type: 'auto', o }; noteResume();
+  try { await buildReel(o, S, vids); }
+  catch (e) {
+    console.warn(e);
+    const keep = P.id; P = normalize(JSON.parse(snap)); P.id = keep; syncEls();
+    busy.hide(); renderTimeline(); renderToolbar(); seekTo(0);
+    toast('Auto edit could not finish on this video, so nothing was changed. Try a shorter length or fewer clips.', 5000);
+  } finally { resumeTask = null; noteResume(); }
+}
+async function buildReel(o, S, vids) {
+  const rnd = seeded(Date.now()), pick = (arr, avoid) => { const a = arr.filter(x => x !== avoid); return a.length ? a[Math.floor(rnd() * a.length)] : arr[0]; };
   let mu = P.audio.find(a => a.kind === 'music'), bpm = S.bpm, beats = null;
-  if (o.music && mu) { const res = await detectBeats(mu); if (res) { bpm = res.bpm; beats = res.beats; } }
-  const beat = 60 / bpm, win0 = beat * S.beatsPerCut;
-  const cands = []; let i = 0;
-  for (const c of vids) {
+  if (o.music && mu) { busy.text('Listening to your music'); const res = await detectBeats(mu); if (res) { bpm = res.bpm; beats = res.beats; } }
+  const beat = 60 / bpm;
+  // 1. Score every moment of every clip: movement in the picture and how loud it is. Long clips are looked at
+  //    less often, so a long video needs no more memory or time than a short one.
+  const tracks = [];
+  for (let i = 0; i < vids.length && !cancelFlag; i++) {
+    const c = vids[i], m = media[c.mediaId], len = c.out - c.in, fps = clamp(180 / Math.max(1, len), .2, 2);
+    busy.text(vids.length > 1 ? `Watching clip ${i + 1} of ${vids.length}` : 'Watching your video');
+    const S2 = await sampleGray(m, c.in, c.out, fps, 32, p => busy.pct((i + p * .9) / vids.length * .68));
     if (cancelFlag) break;
-    const m = media[c.mediaId], S2 = await sampleGray(m, c.in, c.out, 2, 48, p => busy.pct((i + p * .8) / vids.length * .7)), buf = await decodeMedia(m);
-    const mot = S2.frames.map((f, k) => { if (!k) return 0; const A = S2.frames[k - 1]; let s = 0; for (let j = 0; j < f.length; j += 3) s += Math.abs(f[j] - A[j]); return s / (f.length / 3); });
-    const rms = buf ? rmsWindows(buf, c.in, c.out, .5) : [];
-    const mM = Math.max(1e-6, ...mot), mR = Math.max(1e-6, ...rms), win = Math.min(win0, c.out - c.in);
-    for (let s = c.in; s + win <= c.out + 1e-6; s += .5) {
-      const k0 = Math.floor((s - c.in) * 2), k1 = Math.ceil((s + win - c.in) * 2);
-      let a = 0, b = 0, n = 0; for (let k = k0; k < k1; k++) { a += (mot[k] || 0) / mM; b += (rms[k] || 0) / mR; n++; }
-      cands.push({ c, s, e: s + win, score: (a + b) / Math.max(1, n) });
+    const n = S2.frames.length; if (n < 2) continue;
+    busy.text('Listening to the sound');
+    const buf = await decodeLite(m);
+    const mot = new Float32Array(n), sig = new Float32Array(n);
+    for (let k = 0; k < n; k++) {
+      const f = S2.frames[k]; let b = 0; for (let j = 0; j < f.length; j += 5) b += f[j]; sig[k] = b / (f.length / 5);
+      if (k) { const A = S2.frames[k - 1]; let s = 0; for (let j = 0; j < f.length; j += 3) s += Math.abs(f[j] - A[j]); mot[k] = s / (f.length / 3); }
     }
-    i++;
+    mot[0] = mot[1];
+    const rms = buf ? rmsWindows(buf, c.in, c.out, 1 / fps) : [];
+    let mM = 1e-6, mR = 1e-6; for (let k = 0; k < n; k++) { mM = Math.max(mM, mot[k]); mR = Math.max(mR, rms[k] || 0); }
+    const score = new Float32Array(n); for (let k = 0; k < n; k++) score[k] = buf ? .6 * mot[k] / mM + .4 * (rms[k] || 0) / mR : mot[k] / mM;
+    tracks.push({ c, fps, score, sig, used: [] });
+    S2.frames.length = 0; await sleep(0);
   }
   if (cancelFlag) { busy.hide(); toast('Stopped'); return; }
-  cands.sort((a, b) => b.score - a.score);
-  const picked = []; let total = 0;
-  for (const k of cands) { if (total >= target) break; if (picked.some(p => p.c.mediaId === k.c.mediaId && k.s < p.e && k.e > p.s)) continue; picked.push(k); total += k.e - k.s; }
-  picked.sort((a, b) => P.clips.indexOf(a.c) - P.clips.indexOf(b.c) || a.s - b.s);
-  const merged = []; for (const p of picked) { const L = merged[merged.length - 1]; if (L && L.c === p.c && Math.abs(L.e - p.s) < .01) L.e = p.e; else merged.push({ ...p }); }
-  if (!merged.length) { busy.hide(); toast('Clips are too short for a reel'); return; }
-  busy.text('Editing: cuts, music and titles'); busy.pct(.75);
-  P.clips = merged.map((p, k) => {
-    const c = { ...deep(clean(p.c)), id: uid(), in: p.s, out: p.e, speed: 1, kf: [], stab: null, frame: null, transition: 'none' };
-    c.anim = { in: k === 0 ? S.first : 'none', out: k === merged.length - 1 ? 'fade' : 'none', combo: o.grade ? S.combo : 'none', dIn: .6, dOut: .8 };
-    if (o.trans && k < merged.length - 1) c.transition = S.trans[k % S.trans.length];
-    if (o.grade) { c.filter = S.filter; c.fx = { ...(c.fx || {}), ...S.fx }; }
+  if (!tracks.length) throw new Error('nothing to score');
+  // 2. Pick moments one by one. Cut lengths follow the beat in the style's rhythm; a moment is used once and
+  //    moments that look like one already picked are less likely, so the edit has variety.
+  busy.text('Choosing the best moments'); busy.pct(.72);
+  const picks = []; let total = 0;
+  for (let guard = 0; total < o.len - beat * .5 && guard < 300; guard++) {
+    const L = beat * S.cut[picks.length % S.cut.length] * (rnd() < .15 ? 2 : 1);
+    let best = null;
+    for (const tr of tracks) {
+      const { c, fps, score, sig } = tr; if (c.out - c.in < L * .6) continue;
+      const w = Math.max(1, Math.round(L * fps)), step = Math.max(1, Math.round(fps * .5));
+      for (let k = 0; k + w <= score.length || (k === 0 && score.length); k += step) {
+        const s0 = c.in + k / fps, e0 = Math.min(c.out, s0 + L);
+        if (tr.used.some(([a, b]) => s0 < b + .25 && e0 > a - .25)) { if (k + w > score.length) break; continue; }
+        let sc = 0; const kn = Math.min(score.length, k + w); for (let j = k; j < kn; j++) sc += score[j]; sc /= Math.max(1, kn - k);
+        const sg = sig[Math.min(score.length - 1, k + (w >> 1))];
+        if (picks.some(p => p.c.mediaId === c.mediaId && Math.abs(p.sig - sg) < 3)) sc *= .55;
+        sc *= .9 + rnd() * .2;
+        if (!best || sc > best.sc) best = { tr, c, s: s0, e: e0, sc, sig: sg };
+        if (k + w > score.length) break;
+      }
+    }
+    if (!best) break;
+    best.tr.used.push([best.s, best.e]); picks.push(best); total += best.e - best.s;
+  }
+  if (!picks.length) { busy.hide(); toast('Clips are too short for this edit'); return; }
+  picks.sort((a, b) => P.clips.indexOf(a.c) - P.clips.indexOf(b.c) || a.s - b.s);
+  const strong = new Set([...picks].sort((a, b) => b.sc - a.sc).slice(0, Math.max(1, Math.round(picks.length * .25))));
+  // 3. Build the edit: a varied transition on some cuts only (never the same twice in a row, never more than two
+  //    in a row), a different sound under each, accent effects only on the strongest moments.
+  busy.text('Editing: cuts, transitions and effects'); busy.pct(.78);
+  let lastTr = null, lastSfx = null, lastCombo = null, run = 0;
+  const clips = picks.map((p, k) => {
+    const c = { ...deep(clean(p.c)), id: uid(), in: p.s, out: p.e, speed: 1, kf: [], stab: null, frame: null, transition: 'none', trSfx: null, trVol: .55 };
+    const combo = o.grade ? pick(S.combos, lastCombo) : 'none'; lastCombo = combo;
+    c.anim = { in: k === 0 ? S.first : 'none', out: k === picks.length - 1 ? 'fade' : 'none', combo, dIn: .5, dOut: .8 };
+    if (o.grade) { c.filter = S.filter; c.fx = { ...S.fx }; if (strong.has(p) && S.accent.length && rnd() < .8) c.fx[pick(S.accent)] = +(.45 + rnd() * .3).toFixed(2); }
+    if (o.trans && k < picks.length - 1) {
+      if (run < 2 && (rnd() < S.rate || strong.has(picks[k + 1]))) {
+        c.transition = pick(S.trans, lastTr); lastTr = c.transition; run++;
+        if (o.sfx && rnd() < .85) { c.trSfx = pick(S.sfx, lastSfx); lastSfx = c.trSfx; }
+      } else run = 0;
+    }
     return c;
   });
+  // Now and then a clip makes its own entrance, but only after a plain cut.
+  for (let k = 1; k < clips.length; k++) if (o.grade && clips[k - 1].transition === 'none' && rnd() < .3) clips[k].anim.in = pick(S.ins);
+  P.clips = clips;
   layout(); const D = P._main;
   // Titles: an opening title with a subtitle, and a closing card.
   P.overlays = P.overlays.filter(x => !x.reel);
   if (o.titles) {
-    const tLen = Math.min(3.2, D * .4);
-    if (o.title) P.overlays.push(normOv({ id: uid(), reel: true, type: 'text', text: o.title, start: .15, end: tLen, x: .5, y: .44, scale: 1, rot: 0, stroke: false, box: false, glow: false, shadow: false, ...deep(S.title) }));
-    if (o.sub) P.overlays.push(normOv({ id: uid(), reel: true, type: 'text', text: o.sub, start: .55, end: tLen, x: .5, y: .53, scale: 1, rot: 0, stroke: false, box: false, glow: false, shadow: true, ...deep(S.sub) }));
-    if (D > 6) P.overlays.push(normOv({ id: uid(), reel: true, type: 'text', text: o.title ? `${o.title}\nThanks for watching` : 'Thanks for watching', start: Math.max(tLen + .5, D - 2.4), end: D, x: .5, y: .5, scale: 1, rot: 0, stroke: false, box: false, glow: false, shadow: true, ...deep(S.title), size: S.title.size * .62, anim: S.endAnim }));
+    const tLen = Math.min(3.2, D * .4), base = { reel: true, type: 'text', x: .5, scale: 1, rot: 0, stroke: false, box: false, glow: false, shadow: false };
+    if (o.title) P.overlays.push(normOv({ id: uid(), ...base, text: o.title, start: .15, end: tLen, y: .44, ...deep(S.title) }));
+    if (o.sub) P.overlays.push(normOv({ id: uid(), ...base, shadow: true, text: o.sub, start: .55, end: tLen, y: .53, ...deep(S.sub) }));
+    if (D > 6) P.overlays.push(normOv({ id: uid(), ...base, shadow: true, text: o.title ? `${o.title}\nThanks for watching` : 'Thanks for watching', start: Math.max(tLen + .5, D - 2.4), end: D, y: .5, ...deep(S.title), size: S.title.size * .62, anim: S.endAnim }));
   }
   // Music: keep the user's song, or compose one to fit.
   if (o.music && !mu) {
-    busy.text('Composing the music'); busy.pct(.82);
+    busy.text('Composing the music'); busy.pct(.84);
     const mus = await renderMusic(o.style, D + .5);
     const mm = await addMediaRecord('audio', `Music · ${S.name}`, wavBlob(mus.buf.getChannelData(0), mus.buf.sampleRate), mus.buf.duration);
     mu = addAudioItem(mm, 'music', 0); mu.out = Math.min(mm.duration, D); mu.fadeIn = .4; mu.fadeOut = 1.6; beats = mus.beats; bpm = mus.bpm;
   }
   if (mu) { mu.volume = P.clips.some(c => c.kind === 'video' && !c.muted) ? .6 : .85; if (beats) { P.beats = beats.filter(b => b <= D + .01); P.bpm = bpm; } }
   if (o.music) P.clips.forEach(c => { c.volume = Math.min(c.volume, .7); });
-  // Sound effects under each transition, and one on the opening title.
-  if (o.sfx) {
-    busy.text('Adding sound effects'); busy.pct(.92);
-    P.audio = P.audio.filter(a => !a.reel);
-    for (const c of P.clips) if (c.transition !== 'none') (await sfxItem(S.sfx, c._start + clipLen(c) - (S.sfx === 'riser' ? 1.8 : .35), S.sfx === 'riser' ? .35 : .55)).reel = true;
-    if (o.titles && o.title) (await sfxItem(o.style === 'energetic' ? 'impact' : 'whoosh', .05, .5)).reel = true;
-  }
+  // Cut sounds now live on the cuts; sound items from earlier auto edits are removed.
+  P.audio = P.audio.filter(a => !a.reel);
+  if (o.sfx && o.titles && o.title) { busy.text('Adding sound effects'); busy.pct(.93); (await sfxItem(S.titleSfx, .05, .5)).reel = true; }
+  await prepTrSounds();
   busy.hide();
   sel = null; commit(); renderToolbar(); seekTo(0);
-  toast(`Edit ready: ${Math.round(D)} s, ${merged.length} cuts${o.music ? ', music' : ''}${o.titles ? ', titles' : ''}. Undo brings your full edit back.`, 4000);
+  const nTr = P.clips.filter(c => c.transition !== 'none').length;
+  toast(`Edit ready: ${Math.round(D)} s, ${P.clips.length} cuts, ${nTr} transitions${o.music ? ', music' : ''}${o.titles ? ', titles' : ''}. Undo brings your full edit back.`, 4500);
 }
 
 /* --- Captions ---
@@ -2996,7 +3414,7 @@ async function autoReel(o) {
    preview, retimed on the timeline and restyled; typed ones are kept when the automatic ones are made again. */
 let asr = null, asrModel = '';
 const capList = () => P.overlays.filter(o => o.caption).sort((a, b) => a.start - b.start);
-const CAP_LOOK = ['font', 'color', 'stroke', 'box', 'boxColor', 'boxAlpha', 'glow', 'shadow', 'size', 'spacing', 'x', 'y'];
+const CAP_LOOK = ['font', 'color', 'stroke', 'box', 'boxColor', 'boxAlpha', 'glow', 'shadow', 'grad', 'depth', 'size', 'spacing', 'x', 'y'];
 const capRow = o => `<div class="caprow" data-cid="${o.id}"><button type="button" class="cap-t" data-jump aria-label="Go to this caption">${fmt(o.start)}</button><input class="cap-in" value="${esc(o.text)}" aria-label="Caption text" enterkeyhint="done"><button type="button" class="cap-x" data-del aria-label="Delete caption">${icon('close')}</button></div>`;
 function captionsSheet() {
   const caps = capList(), ref = caps[0], auto = caps.some(o => !o.manual);
@@ -3152,6 +3570,8 @@ async function runExport(res, fps, q) {
   const mime = pickMime();
   if (!mime || !cv.captureStream) { toast('This phone cannot record video from the editor. Update Android System WebView from the Play Store.', 5000); return; }
   actx().resume();
+  resumeTask = { type: 'export', res, fps, q }; noteResume();
+  await prepTrSounds();
   sel = null; renderToolbar();
   setCanvasSize(res === 720 ? 1280 : res === 2160 ? 3840 : 1920);
   T = 0; syncMedia(false);
@@ -3175,6 +3595,7 @@ async function runExport(res, fps, q) {
       playing = false; cancelAnimationFrame(raf);
       for (const e of Object.values(els)) if (!e.img) e.el.pause();
       rec.onstop = async () => {
+        resumeTask = null; noteResume();
         stream.getVideoTracks().forEach(t => t.stop());
         setCanvasSize(PREVIEW_LONG); T = 0; syncMedia(false); draw(); renderTimeline(); updPlay();
         if (cancelled) { busy.hide(); toast(cancelled === 'hidden' ? 'Export stopped because SplashCut was closed. Keep the app open until the export finishes.' : 'Export cancelled', 4500); return; }
@@ -3230,6 +3651,7 @@ const SFX = {
 };
 function noiseBuf(oc, sec) { const b = oc.createBuffer(1, Math.ceil(oc.sampleRate * sec), oc.sampleRate), d = b.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; return b; }
 async function renderSfx(kind) {
+  if (SFX_X[kind]) return renderSfxX(kind);
   const dur = SFX[kind][1], sr = 44100, oc = new OfflineAudioContext(1, Math.ceil(sr * dur), sr), out = oc.createGain(); out.connect(oc.destination);
   const env = (g, pts) => { g.gain.setValueAtTime(pts[0][1], 0); pts.slice(1).forEach(([t, v]) => g.gain.linearRampToValueAtTime(v, t)); };
   const noise = (sec, filterType, f0, f1, q = 1, pts) => {
@@ -3259,20 +3681,6 @@ async function renderSfx(kind) {
   return oc.startRendering();
 }
 const sfxMedia = {};
-function sfxSheet() {
-  openSheet('Sound effects', `<div class="sfx-grid">${Object.entries(SFX).map(([k, [n, d]]) => `<div class="sfx"><button type="button" class="pl" data-play="${k}" aria-label="Play ${n}">${icon('play')}</button><span>${n}<br><small class="note">${d < 1 ? Math.round(d * 1000) + ' ms' : d.toFixed(1) + ' s'}</small></span><button type="button" class="add" data-add="${k}">Add</button></div>`).join('')}</div><p class="note">Sound effects are added at the playhead on the audio track. Tap one on the timeline to move, trim or change its volume.</p>`,
-  r => r.addEventListener('click', async e => {
-    const pb = e.target.closest('[data-play]'), ab = e.target.closest('[data-add]');
-    if (pb) { const buf = await renderSfx(pb.dataset.play), ac = actx(); ac.resume(); const s = ac.createBufferSource(); s.buffer = buf; s.connect(master); s.start(); return; }
-    if (!ab) return;
-    const k = ab.dataset.add;
-    let m = sfxMedia[k] && media[sfxMedia[k]];
-    if (!m) { const buf = await renderSfx(k); m = await addMediaRecord('audio', SFX[k][0], wavBlob(buf.getChannelData(0), buf.sampleRate), buf.duration); sfxMedia[k] = m.id; }
-    const a = addAudioItem(m, 'sfx', T); a.out = m.duration; a.volume = 1;
-    commit(); toast(`${SFX[k][0]} added at ${fmt(T)}`);
-  }));
-}
-
 /* --- Split-screen layouts --- */
 const LAYOUTS = {
   top2: ['Top / bottom', [[0, 0, 1, .5], [0, .5, 1, .5]]],
@@ -3625,11 +4033,18 @@ async function openProject(id) {
   const ids = new Set([...p.clips, ...p.layers, ...p.audio].map(x => x.mediaId)); let n = 0, missing = 0;
   for (const mid of ids) { const m = await loadMedia(mid); if (!m) missing++; busy.pct(++n / Math.max(1, ids.size)); }
   busy.hide();
+  const savedHist = p.hist, savedHi = p.hi; delete p.hist; delete p.hi;
   P = p;
   if (missing) { P.clips = P.clips.filter(c => media[c.mediaId]); P.layers = P.layers.filter(c => media[c.mediaId]); P.audio = P.audio.filter(a => media[a.mediaId]); toast(`${missing} file${missing > 1 ? 's were' : ' was'} missing and removed from the project`); }
   for (const a of P.audio) { const m = media[a.mediaId]; if (m && !m.wave) showWave(m); }
   if (vis().some(c => c.removeBg || c.blurBg || (c.relight && c.relight.person))) loadSeg().then(ok => { if (ok) requestDraw(); });
   await enterEditor();
+  if (Array.isArray(savedHist) && savedHist.length) {
+    const cur = JSON.stringify(clean(P)); hist = savedHist; hi = clamp(savedHi | 0, 0, hist.length - 1);
+    if (hist[hi] !== cur) { hist = hist.slice(0, hi + 1); hist.push(cur); hi = hist.length - 1; }
+    updUndo();
+  }
+  noteResume();
 }
 async function enterEditor() {
   $('#home').hidden = true; $('#editor').hidden = false;
@@ -3643,6 +4058,7 @@ async function enterEditor() {
 async function leaveEditor() {
   if (playing) pause(); closeSheet();
   await saveProject();
+  store.set('sc_resume', null);
   for (const id of Object.keys(els)) dropEl(id);
   // Decoded sound can take hundreds of MB; it is decoded again only if a tool needs it.
   for (const m of Object.values(media)) { if (!m.dec) m.buf = undefined; }
@@ -3652,12 +4068,44 @@ async function leaveEditor() {
 }
 // Android calls this when the phone is low on memory: drop everything that is rebuilt when needed.
 window.scFree = () => {
-  for (const m of Object.values(media)) if (!m.dec) m.buf = undefined;
+  for (const m of Object.values(media)) { if (!m.dec) m.buf = undefined; if (!m.liteJob) m.lite = undefined; }
   freeCanvases(null); segCache.clear();
   if (P) { for (const id of Object.keys(els)) if (!playing && !exporting) dropEl(id); if (!playing && !exporting) { syncMedia(false); requestDraw(); } }
   if (hist.length > 12) { const cut = hist.length - 12; hist = hist.slice(cut); hi = Math.max(0, hi - cut); if (P) updUndo(); }
 };
-if (/[?&]recovered=1/.test(location.search)) setTimeout(() => toast('SplashCut ran low on memory and restarted. Your project was saved, open it to carry on.', 6000), 800);
+/* Resume after a crash. Where you are in the open project (playhead, zoom, selection) is noted as you work and
+   every edit is saved within a moment. If SplashCut is closed by Android or crashes, it reopens the project at the
+   same place with Undo, and offers to start an export or auto edit again if one was running. Going back to the
+   project list on purpose clears it. */
+let resumeTask = null;
+function noteResume() {
+  if (!P) return;
+  store.set('sc_resume', { pid: P.id, T: +T.toFixed(3), pps: Math.round(pps), sel: sel && sel.type !== 'end' ? sel : null, task: resumeTask, at: Date.now() });
+}
+setInterval(() => { if (P && !exporting && !recording) noteResume(); }, 2000);
+function askAgain(title, text, label, go) {
+  const ring = $('#busy .ring'); busy.show(title, text); if (ring) ring.style.display = 'none';
+  busy.actions(`<button type="button" class="btn" id="rsNo">Not now</button><button type="button" class="btn main" id="rsGo">${label}</button>`);
+  const done = () => { busy.hide(); if (ring) ring.style.display = ''; };
+  $('#rsNo').onclick = () => { done(); resumeTask = null; noteResume(); };
+  $('#rsGo').onclick = () => { done(); go(); };
+}
+async function resumeSession() {
+  const r = store.get('sc_resume', null), crashed = /[?&]recovered=1/.test(location.search);
+  const note = () => { if (crashed) toast('SplashCut ran low on memory and restarted. Your project was saved, open it to carry on.', 6000); };
+  if (!r || !r.pid || Date.now() - (r.at || 0) > 7 * 864e5) { note(); return; }
+  let ok = false; try { ok = (await allProjects()).some(p => p.id === r.pid); } catch (e) { ok = false; }
+  if (!ok) { store.set('sc_resume', null); note(); return; }
+  try { await openProject(r.pid); } catch (e) { busy.hide(); note(); return; }
+  if (!P) return;
+  if (r.pps) setZoom(r.pps);
+  if (r.sel) { sel = r.sel; if (!findSel()) sel = null; renderToolbar(); renderTimeline(); }
+  seekTo(Math.min(r.T || 0, duration()));
+  toast(crashed ? 'SplashCut ran low on memory and restarted. You are back where you left off.' : 'You are back where you left off.', 4500);
+  const t = r.task;
+  if (t && t.type === 'export') { resumeTask = t; askAgain('Export did not finish', 'SplashCut closed before the video was saved. Your edit is safe.', 'Export again', () => runExport(t.res, t.fps, t.q)); }
+  else if (t && t.type === 'auto' && t.o) { resumeTask = t; askAgain('Auto edit did not finish', 'SplashCut closed while making the edit. Your clips are as they were.', 'Run it again', () => autoReel(t.o)); }
+}
 $('#edBack').onclick = leaveEditor;
 $('#projName').addEventListener('change', e => { P.name = e.target.value.trim() || P.name; e.target.value = P.name; scheduleSave(); });
 $('#undo').onclick = () => { if (hi > 0) restore(hi - 1); };
@@ -3673,12 +4121,407 @@ document.addEventListener('visibilitychange', () => {
   if (exporting) exporting.abort('hidden');
   else if (recording) stopVoice();
   else if (playing) pause();
-  if (P) saveProject();
+  if (P) { saveProject(); noteResume(); }
 });
+
+/* ================= More transitions =================
+   Each one draws a single frame of the cut: k rises from 0 to 1 as the cut gets closer and falls back after it,
+   d is -1 for the outgoing clip and +1 for the incoming one. */
+const tShade = (c, W, H, a) => { if (a > .002) { c.fillStyle = `rgba(0,0,0,${clamp(a, 0, 1)})`; c.fillRect(0, 0, W, H); } };
+function tMat(c, f, W, H, m, shade) { c.save(); c.setTransform(m[0], m[1], m[2], m[3], m[4], m[5]); c.drawImage(f, 0, 0); tShade(c, W, H, shade); c.restore(); }
+// A face turning on one edge, like a door or the side of a cube; the other edge leans to look three-dimensional.
+function tHinge(c, f, W, H, side, k, sk = .12) {
+  const q = Math.max(.001, 1 - k), s = k * sk;
+  tMat(c, f, W, H, side === 'l' ? [q, s, 0, 1, 0, 0] : side === 'r' ? [q, -s, 0, 1, W * k, s * W] : side === 't' ? [1, 0, s, q, 0, 0] : [1, 0, -s, q, s * H, H * k], k * .55);
+}
+function tCentre(c, f, W, H, sx, sy, rot, shade) { c.save(); c.translate(W / 2, H / 2); if (rot) c.rotate(rot); c.scale(sx, sy); c.translate(-W / 2, -H / 2); c.drawImage(f, 0, 0); tShade(c, W, H, shade || 0); c.restore(); }
+function tHole(c, W, H, path) { c.save(); c.beginPath(); c.rect(0, 0, W, H); path(c); c.fillStyle = '#000'; c.fill('evenodd'); c.restore(); }
+function tEcho(c, f, W, H, n, step, alpha) { c.drawImage(f, 0, 0); c.save(); c.globalAlpha = alpha; for (let i = 1; i <= n; i++) { const [dx, dy, s] = step(i); c.drawImage(f, W / 2 - W * s / 2 + dx, H / 2 - H * s / 2 + dy, W * s, H * s); } c.restore(); }
+function tFill(c, W, H, col, a) { if (a > .002) { c.save(); c.globalAlpha = clamp(a, 0, 1); c.fillStyle = col; c.fillRect(0, 0, W, H); c.restore(); } }
+const TRANS_X = {
+  flip3d: ['3D flip', '3D', (c, f, W, H, k) => { const q = Math.max(.001, Math.cos(k * Math.PI / 2)); tMat(c, f, W, H, [q, 0, 0, 1 - k * .1, W / 2 * (1 - q), H * k * .05], k * .5); }],
+  flipv3d: ['3D flip up', '3D', (c, f, W, H, k) => { const q = Math.max(.001, Math.cos(k * Math.PI / 2)); tMat(c, f, W, H, [1 - k * .1, 0, 0, q, W * k * .05, H / 2 * (1 - q)], k * .5); }],
+  cube: ['3D cube', '3D', (c, f, W, H, k, d) => tHinge(c, f, W, H, d < 0 ? 'l' : 'r', k)],
+  cubeup: ['3D cube up', '3D', (c, f, W, H, k, d) => tHinge(c, f, W, H, d < 0 ? 't' : 'b', k)],
+  door: ['Door', '3D', (c, f, W, H, k) => tHinge(c, f, W, H, 'l', k, .2)],
+  swing3d: ['Swing', '3D', (c, f, W, H, k) => tHinge(c, f, W, H, 't', k, .25)],
+  page: ['Page turn', '3D', (c, f, W, H, k, d) => { if (d < 0) tHinge(c, f, W, H, 'l', k, .06); else { c.drawImage(f, 0, 0); const g = c.createLinearGradient(0, 0, W * .7, 0); g.addColorStop(0, `rgba(0,0,0,${.75 * k})`); g.addColorStop(1, 'rgba(0,0,0,0)'); c.fillStyle = g; c.fillRect(0, 0, W, H); } }],
+  fold: ['Fold', '3D', (c, f, W, H, k) => tMat(c, f, W, H, [1, 0, 0, Math.max(.001, 1 - k), 0, H / 2 * k], k * .6)],
+  roll: ['Barrel roll', '3D', (c, f, W, H, k, d) => { tCentre(c, f, W, H, 1 - k * .35, 1 - k * .35, d * k * Math.PI * .5); tShade(c, W, H, k * k * .8); }],
+  tilt3d: ['Tilt', '3D', (c, f, W, H, k, d) => { c.save(); const px = d < 0 ? 0 : W; c.translate(px, H); c.rotate((d < 0 ? -1 : 1) * k * .5); c.translate(-px, -H); c.drawImage(f, 0, 0); tShade(c, W, H, k * .4); c.restore(); }],
+  zoomspin: ['Zoom spin', 'Zoom & spin', (c, f, W, H, k, d) => tCentre(c, f, W, H, 1 + k * .6, 1 + k * .6, d * k * .8)],
+  warp: ['Warp zoom', 'Zoom & spin', (c, f, W, H, k) => tEcho(c, f, W, H, 5, i => [0, 0, 1 + k * .1 * i], .22)],
+  dolly: ['Dolly zoom', 'Zoom & spin', (c, f, W, H, k) => tCentre(c, f, W, H, 1 + k * .3, 1 + k * .3, 0, k * .25)],
+  spin360: ['Spin 360', 'Zoom & spin', (c, f, W, H, k, d) => tCentre(c, f, W, H, 1 - k * .5, 1 - k * .5, d * k * Math.PI)],
+  twist: ['Twist', 'Zoom & spin', (c, f, W, H, k, d) => tCentre(c, f, W, H, 1 - k * .3, 1 + k * .15, d * k * .6, k * .3)],
+  zoomblur2: ['Zoom in blur', 'Zoom & spin', (c, f, W, H, k) => { c.filter = `blur(${(k * W / 45).toFixed(1)}px)`; tCentre(c, f, W, H, 1 + k * .4, 1 + k * .4, 0); c.filter = 'none'; }],
+  pushl: ['Push left', 'Push', (c, f, W, H, k, d) => { c.save(); c.translate(d * k * W * .6, 0); c.drawImage(f, 0, 0); c.restore(); tShade(c, W, H, k * .2); }],
+  pushr: ['Push right', 'Push', (c, f, W, H, k, d) => { c.save(); c.translate(-d * k * W * .6, 0); c.drawImage(f, 0, 0); c.restore(); tShade(c, W, H, k * .2); }],
+  pushu: ['Push up', 'Push', (c, f, W, H, k, d) => { c.save(); c.translate(0, d * k * H * .6); c.drawImage(f, 0, 0); c.restore(); tShade(c, W, H, k * .2); }],
+  pushd: ['Push down', 'Push', (c, f, W, H, k, d) => { c.save(); c.translate(0, -d * k * H * .6); c.drawImage(f, 0, 0); c.restore(); tShade(c, W, H, k * .2); }],
+  pushdiag: ['Diagonal push', 'Push', (c, f, W, H, k, d) => { c.save(); c.translate(d * k * W * .5, d * k * H * .5); c.drawImage(f, 0, 0); c.restore(); tShade(c, W, H, k * .2); }],
+  pushzoom: ['Push and shrink', 'Push', (c, f, W, H, k, d) => { c.save(); c.translate(d * k * W * .5, 0); tCentre(c, f, W, H, 1 - k * .3, 1 - k * .3, 0, k * .3); c.restore(); }],
+  radial: ['Radial blur', 'Blur', (c, f, W, H, k) => tEcho(c, f, W, H, 7, i => [0, 0, 1 + k * .06 * i], .2)],
+  motionh: ['Motion blur', 'Blur', (c, f, W, H, k, d) => tEcho(c, f, W, H, 5, i => [d * i * k * W * .03, 0, 1], .25)],
+  motionv: ['Vertical blur', 'Blur', (c, f, W, H, k, d) => tEcho(c, f, W, H, 5, i => [0, d * i * k * H * .03, 1], .25)],
+  defocus: ['Defocus', 'Blur', (c, f, W, H, k) => { c.filter = `blur(${(k * W / 40).toFixed(1)}px)`; tCentre(c, f, W, H, 1 + k * .08, 1 + k * .08, 0); c.filter = 'none'; }],
+  flashgold: ['Gold flash', 'Light', (c, f, W, H, k) => { c.drawImage(f, 0, 0); tFill(c, W, H, '#ffcd6e', k); }],
+  filmburn: ['Film burn', 'Light', (c, f, W, H, k, d, p) => {
+    c.drawImage(f, 0, 0); c.save(); c.globalCompositeOperation = 'screen';
+    for (const [x, y, col] of [[.2 + .6 * p, .4, '255,120,30'], [.8 - .4 * p, .7, '255,40,40']]) { const r = Math.max(W, H) * (.3 + k * .9), g = c.createRadialGradient(x * W, y * H, 0, x * W, y * H, r); g.addColorStop(0, `rgba(${col},${k})`); g.addColorStop(1, `rgba(${col},0)`); c.fillStyle = g; c.fillRect(0, 0, W, H); }
+    c.restore(); tFill(c, W, H, '#fff3d0', k * k * .6);
+  }],
+  leak: ['Light leak', 'Light', (c, f, W, H, k, d, p) => { c.drawImage(f, 0, 0); const x = (p * 1.6 - .3) * W, g = c.createLinearGradient(x - W * .5, 0, x + W * .5, H * .2); g.addColorStop(0, 'rgba(255,150,60,0)'); g.addColorStop(.5, `rgba(255,170,80,${.95 * k})`); g.addColorStop(1, 'rgba(255,80,140,0)'); c.save(); c.globalCompositeOperation = 'screen'; c.fillStyle = g; c.fillRect(0, 0, W, H); c.restore(); }],
+  flare: ['Lens flare', 'Light', (c, f, W, H, k, d, p) => { c.drawImage(f, 0, 0); c.save(); c.globalCompositeOperation = 'lighter'; const x = W * p, y = H * .35, g = c.createRadialGradient(x, y, 0, x, y, W * .6); g.addColorStop(0, `rgba(255,255,240,${.95 * k})`); g.addColorStop(.25, `rgba(255,210,140,${.45 * k})`); g.addColorStop(1, 'rgba(255,200,120,0)'); c.fillStyle = g; c.fillRect(0, 0, W, H); c.fillStyle = `rgba(255,240,220,${.5 * k})`; c.fillRect(0, y - H * .004, W, H * .008); c.restore(); }],
+  bloomflash: ['Bloom flash', 'Light', (c, f, W, H, k, d, p, tmp, tx) => { c.drawImage(f, 0, 0); sizeCanvas(tmp, W, H); tx.setTransform(1, 0, 0, 1, 0, 0); tx.globalCompositeOperation = 'source-over'; tx.filter = `blur(${Math.round(W / 30)}px) brightness(1.8)`; tx.clearRect(0, 0, W, H); tx.drawImage(f, 0, 0); tx.filter = 'none'; c.save(); c.globalCompositeOperation = 'lighter'; c.globalAlpha = k * .8; c.drawImage(tmp, 0, 0); c.restore(); }],
+  dipred: ['Dip to red', 'Light', (c, f, W, H, k) => { c.drawImage(f, 0, 0); tFill(c, W, H, '#d0102a', k); }],
+  dipblue: ['Dip to blue', 'Light', (c, f, W, H, k) => { c.drawImage(f, 0, 0); tFill(c, W, H, '#1236ff', k); }],
+  strobe: ['Strobe', 'Light', (c, f, W, H, k, d, p) => { c.drawImage(f, 0, 0); if (k > .15 && Math.floor(p * 16) % 2 === 0) tFill(c, W, H, '#fff', k * .9); }],
+  diamond: ['Diamond', 'Shapes', (c, f, W, H, k) => { c.drawImage(f, 0, 0); const r = (1 - k) * Math.hypot(W, H) * .75; tHole(c, W, H, x => { x.moveTo(W / 2, H / 2 - r); x.lineTo(W / 2 + r, H / 2); x.lineTo(W / 2, H / 2 + r); x.lineTo(W / 2 - r, H / 2); x.closePath(); }); }],
+  square: ['Box', 'Shapes', (c, f, W, H, k) => { c.drawImage(f, 0, 0); const r = (1 - k) * Math.max(W, H) * .75; tHole(c, W, H, x => x.rect(W / 2 - r, H / 2 - r, r * 2, r * 2)); }],
+  star: ['Star', 'Shapes', (c, f, W, H, k) => { c.drawImage(f, 0, 0); const R = (1 - k) * Math.hypot(W, H) * 1.1, r = R * .42; tHole(c, W, H, x => { for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r : R; x[i ? 'lineTo' : 'moveTo'](W / 2 + Math.cos(a) * rr, H / 2 + Math.sin(a) * rr); } x.closePath(); }); }],
+  heart: ['Heart', 'Shapes', (c, f, W, H, k) => { c.drawImage(f, 0, 0); const s = (1 - k) * Math.hypot(W, H) * .9, cx = W / 2, cy = H / 2; tHole(c, W, H, x => { x.moveTo(cx, cy + s * .55); x.bezierCurveTo(cx - s * 1.2, cy - s * .25, cx - s * .55, cy - s * 1.05, cx, cy - s * .45); x.bezierCurveTo(cx + s * .55, cy - s * 1.05, cx + s * 1.2, cy - s * .25, cx, cy + s * .55); x.closePath(); }); }],
+  clock: ['Clock wipe', 'Shapes', (c, f, W, H, k) => { c.drawImage(f, 0, 0); if (k > .005) { c.beginPath(); c.moveTo(W / 2, H / 2); c.arc(W / 2, H / 2, Math.hypot(W, H), -Math.PI / 2, -Math.PI / 2 + k * Math.PI * 2); c.closePath(); c.fillStyle = '#000'; c.fill(); } }],
+  doorsh: ['Doors', 'Shapes', (c, f, W, H, k) => { c.drawImage(f, 0, 0); const w = k * W / 2; c.fillStyle = '#000'; c.fillRect(0, 0, w, H); c.fillRect(W - w, 0, w, H); }],
+  doorsv: ['Doors up', 'Shapes', (c, f, W, H, k) => { c.drawImage(f, 0, 0); const h = k * H / 2; c.fillStyle = '#000'; c.fillRect(0, 0, W, h); c.fillRect(0, H - h, W, h); }],
+  diag: ['Diagonal wipe', 'Shapes', (c, f, W, H, k) => { c.drawImage(f, 0, 0); const t = k * (W + H); c.beginPath(); c.moveTo(0, 0); c.lineTo(t, 0); c.lineTo(0, t); c.closePath(); c.fillStyle = '#000'; c.fill(); }],
+  checker: ['Checkerboard', 'Shapes', (c, f, W, H, k) => { c.drawImage(f, 0, 0); const n = 6, cw = W / n, m = Math.ceil(H / cw); c.fillStyle = '#000'; for (let i = 0; i < n; i++) for (let j = 0; j < m; j++) if (rnd2(i * 7 + j * 13 + 1) < k) c.fillRect(i * cw, j * cw, cw + 1, cw + 1); }],
+  vblinds: ['Blinds vertical', 'Shapes', (c, f, W, H, k) => { c.drawImage(f, 0, 0); const n = 8, bw = W / n; c.fillStyle = '#000'; for (let i = 0; i < n; i++) c.fillRect(i * bw, 0, bw * k + 1, H); }],
+  rgbsplit: ['RGB split', 'Glitch', (c, f, W, H, k, d, p, tmp, tx) => { c.drawImage(f, 0, 0); const o = W * .045 * k; c.save(); c.globalCompositeOperation = 'screen'; c.globalAlpha = .8 * k; tint(f, tmp, tx, '#ff2020'); c.drawImage(tmp, -o, 0); tint(f, tmp, tx, '#2050ff'); c.drawImage(tmp, o, 0); c.restore(); }],
+  scanglitch: ['Scan glitch', 'Glitch', (c, f, W, H, k, d, p) => { c.drawImage(f, 0, 0); const fr = Math.floor(p * 30); for (let i = 0; i < 12; i++) { const y = rnd2(i * 5 + fr * 3) * H, h = H * .03, dx = (rnd2(i * 9 + fr * 7) - .5) * W * .2 * k; c.drawImage(f, 0, y, W, h, dx, y, W, h); } c.fillStyle = `rgba(0,0,0,${.25 * k})`; const st = Math.max(2, Math.round(H / 220)); for (let y = 0; y < H; y += st * 2) c.fillRect(0, y, W, st); }],
+  blocks: ['Data blocks', 'Glitch', (c, f, W, H, k, d, p) => { c.drawImage(f, 0, 0); const fr = Math.floor(p * 20); for (let i = 0; i < 16; i++) { if (rnd2(i * 3 + fr) > k) continue; const w = W * (.08 + rnd2(i * 7 + fr) * .25), h = H * (.03 + rnd2(i * 11 + fr) * .1), sx = rnd2(i * 13 + fr) * (W - w), sy = rnd2(i * 17 + fr) * (H - h); c.drawImage(f, sx, sy, w, h, rnd2(i * 19 + fr) * (W - w), rnd2(i * 23 + fr) * (H - h), w, h); } }],
+  rewind: ['VHS rewind', 'Glitch', (c, f, W, H, k, d, p) => { const fr = Math.floor(p * 40), st = Math.max(4, Math.round(H / 120)); for (let y = 0; y < H; y += st) c.drawImage(f, 0, y, W, st, (rnd2(y + fr * 997) - .5) * W * .08 * k, y, W, st); c.fillStyle = `rgba(255,255,255,${.35 * k})`; for (let i = 0; i < 3; i++) c.fillRect(0, rnd2(fr * 5 + i) * H, W, Math.max(1, H / 300)); }],
+  ripple: ['Ripple', 'Distort', (c, f, W, H, k, d, p) => { const st = Math.max(2, Math.round(H / 120)); for (let y = 0; y < H; y += st) c.drawImage(f, 0, y, W, st, Math.sin(y / H * 12 + p * 20) * W * .05 * k, y, W, st); }],
+  stretch: ['Stretch', 'Distort', (c, f, W, H, k) => tCentre(c, f, W, H, 1 + k * 1.4, 1 - k * .2, 0, k * .2)],
+  squeeze: ['Squeeze', 'Distort', (c, f, W, H, k) => tCentre(c, f, W, H, 1 - k * .2, 1 + k * 1.4, 0, k * .2)],
+  mosaic: ['Mosaic', 'Distort', (c, f, W, H, k, d, p, tmp, tx) => { const b = Math.max(2, Math.round(k * W / 7)); sizeCanvas(tmp, Math.ceil(W / b), Math.ceil(H / b)); tx.setTransform(1, 0, 0, 1, 0, 0); tx.drawImage(f, 0, 0, tmp.width, tmp.height); c.imageSmoothingEnabled = false; c.drawImage(tmp, 0, 0, tmp.width, tmp.height, 0, 0, W, H); c.imageSmoothingEnabled = true; }],
+  shatter: ['Shatter', 'Distort', (c, f, W, H, k) => { const nx = 5, ny = 8, tw = W / nx, th = H / ny; for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) { const cx = (i + .5) * tw - W / 2, cy = (j + .5) * th - H / 2, e = k * k * 1.2, rot = (rnd2(i * 7 + j * 11) - .5) * k * 1.6; c.save(); c.translate(W / 2 + cx * (1 + e), H / 2 + cy * (1 + e)); c.rotate(rot); c.globalAlpha = 1 - k * .5; c.drawImage(f, i * tw, j * th, tw, th, -tw / 2, -th / 2, tw + 1, th + 1); c.restore(); } }],
+  strips: ['Strips', 'Distort', (c, f, W, H, k) => { const n = 10, bh = H / n; for (let i = 0; i < n; i++) c.drawImage(f, 0, i * bh, W, bh, (i % 2 ? 1 : -1) * k * k * W, i * bh, W, bh + 1); }],
+  quake: ['Earthquake', 'Camera', (c, f, W, H, k, d, p) => { const fr = Math.floor(p * 60); c.save(); c.translate(W / 2 + (rnd2(fr) - .5) * W * .1 * k, H / 2 + (rnd2(fr + 7) - .5) * H * .07 * k); c.rotate((rnd2(fr + 3) - .5) * .08 * k); c.scale(1 + k * .1, 1 + k * .1); c.translate(-W / 2, -H / 2); c.drawImage(f, 0, 0); c.restore(); }],
+  jolt: ['Jolt', 'Camera', (c, f, W, H, k, d, p) => { const fr = Math.floor(p * 30); c.save(); c.translate((rnd2(fr) - .5) * W * .03 * k, (rnd2(fr + 2) - .5) * H * .03 * k); tCentre(c, f, W, H, 1 + k * .18, 1 + k * .18, 0); c.restore(); }]
+};
+const TRANS_CATS = { Basic: Object.keys(TRANSITIONS).filter(k => k !== 'none') };
+for (const [k, [n, cat]] of Object.entries(TRANS_X)) { TRANSITIONS[k] = n; (TRANS_CATS[cat] = TRANS_CATS[cat] || []).push(k); }
+const TR_3D = TRANS_CATS['3D'];
+
+/* ================= More sound effects =================
+   Made on the phone from small recipes, so nothing is downloaded. Ops:
+   ['n', filter, f0, f1, q, t0, len, peak, shape]  filtered noise sweeping from f0 to f1 Hz
+   ['t', wave, f0, f1, t0, len, peak, shape]       a tone gliding from f0 to f1 Hz
+   ['a', wave, [Hz…], step, len, peak]              notes one after another
+   ['r', count, every, op]                          an op repeated
+   Shapes: hit (sharp start, decays), down (decays), mid (swells and fades), up (swells to the end), flat (held).
+   Options: v = reverb amount, rev = played backwards. */
+const SFX_X = {
+  whoosh2: ['Soft whoosh', .9, 'Transition', [['n', 'bandpass', 300, 2400, 1.2, 0, .9, .6, 'mid']]],
+  whooshfast: ['Fast whoosh', .45, 'Transition', [['n', 'bandpass', 500, 5000, 1.6, 0, .45, .9, 'mid']]],
+  whooshdeep: ['Deep whoosh', 1.1, 'Transition', [['n', 'lowpass', 200, 1400, 1, 0, 1.1, 1, 'mid'], ['t', 'sine', 90, 45, .3, .7, .35, 'mid']]],
+  airswoosh: ['Air swoosh', .7, 'Transition', [['n', 'highpass', 1200, 5000, .7, 0, .7, .6, 'mid']]],
+  swish: ['Sword swish', .35, 'Transition', [['n', 'bandpass', 2500, 7000, 4, 0, .35, .8, 'mid'], ['t', 'sine', 3000, 6000, .05, .25, .08, 'mid']]],
+  revwhoosh: ['Reverse whoosh', 1, 'Transition', [['n', 'bandpass', 200, 3500, 1.4, 0, 1, .9, 'up']]],
+  dblwhoosh: ['Double whoosh', .9, 'Transition', [['n', 'bandpass', 400, 3000, 1.4, 0, .45, .8, 'mid'], ['n', 'bandpass', 500, 4200, 1.4, .38, .5, .8, 'mid']]],
+  swoopup: ['Swoosh up', .6, 'Transition', [['n', 'bandpass', 400, 6000, 2, 0, .6, .8, 'mid'], ['t', 'sine', 300, 1200, 0, .6, .06, 'mid']]],
+  swoopdown: ['Swoosh down', .6, 'Transition', [['n', 'bandpass', 6000, 400, 2, 0, .6, .8, 'mid'], ['t', 'sine', 1200, 300, 0, .6, .06, 'mid']]],
+  trhit: ['Transition hit', 1, 'Transition', [['n', 'lowpass', 3000, 200, .7, 0, .6, .9, 'hit'], ['t', 'sine', 110, 40, 0, .9, .9, 'hit']], { v: .35 }],
+  glitchswipe: ['Glitch swipe', .5, 'Transition', [['r', 8, .05, ['t', 'square', 1200, 300, 0, .04, .2, 'hit']], ['n', 'highpass', 4000, 1500, 1, 0, .5, .5, 'mid']]],
+  paper: ['Paper swipe', .4, 'Transition', [['n', 'highpass', 2500, 1200, .6, 0, .4, .6, 'mid'], ['n', 'bandpass', 5000, 3000, 3, .05, .25, .3, 'hit']]],
+  pageflip: ['Page flip', .35, 'Transition', [['n', 'bandpass', 1800, 3500, 1.5, 0, .12, .6, 'hit'], ['n', 'highpass', 3000, 2000, 1, .12, .2, .5, 'hit']]],
+  warpwhoosh: ['Warp', .8, 'Transition', [['n', 'bandpass', 200, 4000, 3, 0, .8, .7, 'up'], ['t', 'sawtooth', 80, 600, 0, .8, .12, 'up']]],
+  boom: ['Boom', 2, 'Cinematic', [['t', 'sine', 70, 30, 0, 1.8, 1, 'hit'], ['n', 'lowpass', 600, 80, .7, 0, 1.4, .8, 'hit']], { v: .5 }],
+  cinehit: ['Cinematic hit', 2.2, 'Cinematic', [['t', 'sine', 110, 40, 0, 1.2, 1, 'hit'], ['n', 'lowpass', 4000, 200, .7, 0, .8, 1, 'hit'], ['t', 'sawtooth', 55, 50, 0, 1.6, .25, 'hit']], { v: .6 }],
+  braam: ['Braam', 2.4, 'Cinematic', [['t', 'sawtooth', 55, 53, 0, 2.3, .35, 'down'], ['t', 'sawtooth', 82.4, 80, 0, 2.3, .25, 'down'], ['t', 'sawtooth', 110, 108, 0, 2.3, .2, 'down']], { v: .5 }],
+  tension: ['Tension riser', 3, 'Cinematic', [['n', 'bandpass', 150, 5000, 2.5, 0, 3, .7, 'up'], ['t', 'sawtooth', 60, 240, 0, 3, .15, 'up'], ['t', 'sine', 220, 880, 0, 3, .08, 'up']]],
+  risershort: ['Short riser', 1.2, 'Cinematic', [['n', 'bandpass', 300, 7000, 2, 0, 1.2, .8, 'up'], ['t', 'sawtooth', 150, 900, 0, 1.2, .1, 'up']]],
+  downlifter: ['Downlifter', 1.8, 'Cinematic', [['n', 'bandpass', 6000, 150, 2, 0, 1.8, .8, 'down'], ['t', 'sine', 600, 60, 0, 1.8, .2, 'down']]],
+  deepimpact: ['Deep impact', 1.6, 'Cinematic', [['t', 'sine', 55, 28, 0, 1.5, 1, 'hit'], ['n', 'lowpass', 300, 60, .7, 0, .9, .7, 'hit']], { v: .4 }],
+  thud: ['Thud', .5, 'Cinematic', [['t', 'sine', 120, 50, 0, .4, 1, 'hit'], ['n', 'lowpass', 800, 150, .7, 0, .15, .6, 'hit']]],
+  punch: ['Punch', .4, 'Cinematic', [['t', 'sine', 180, 60, 0, .3, 1, 'hit'], ['n', 'bandpass', 1500, 500, 1, 0, .12, .8, 'hit']]],
+  tapestop: ['Tape stop', 1, 'Cinematic', [['t', 'sawtooth', 440, 30, 0, 1, .25, 'flat'], ['t', 'square', 220, 15, 0, 1, .12, 'flat']]],
+  rewindfx: ['Rewind', 1.2, 'Cinematic', [['r', 10, .11, ['t', 'square', 300, 1500, 0, .1, .12, 'hit']], ['n', 'bandpass', 800, 3000, 2, 0, 1.2, .4, 'flat']]],
+  shimmer: ['Shimmer', 1.6, 'Cinematic', [['a', 'sine', [1568, 2093, 2637, 3136, 4186], .12, 1, .18]], { v: .5 }],
+  flashhit: ['Flash hit', .8, 'Cinematic', [['n', 'highpass', 6000, 2000, .7, 0, .6, .8, 'hit'], ['t', 'sine', 2000, 800, 0, .5, .15, 'hit']], { v: .4 }],
+  tap: ['Tap', .08, 'Interface', [['n', 'bandpass', 4000, 4000, 2, 0, .06, .9, 'hit']]],
+  toggle: ['Toggle', .15, 'Interface', [['t', 'square', 1400, 1400, 0, .04, .25, 'hit'], ['t', 'square', 1800, 1800, .06, .05, .25, 'hit']]],
+  blip: ['Blip', .15, 'Interface', [['t', 'sine', 1200, 1800, 0, .12, .5, 'hit']]],
+  success: ['Success', .7, 'Interface', [['a', 'sine', [784, 988, 1175, 1568], .09, .3, .4]]],
+  error: ['Error', .45, 'Interface', [['t', 'square', 220, 200, 0, .18, .25, 'flat'], ['t', 'square', 180, 160, .22, .2, .25, 'flat']]],
+  coin: ['Coin', .5, 'Interface', [['t', 'square', 988, 988, 0, .08, .3, 'hit'], ['t', 'square', 1319, 1319, .08, .4, .3, 'down']]],
+  message: ['Message', .6, 'Interface', [['t', 'sine', 1046, 1046, 0, .15, .45, 'hit'], ['t', 'sine', 1568, 1568, .13, .4, .45, 'hit']]],
+  bubble: ['Bubble pop', .2, 'Interface', [['t', 'sine', 400, 1400, 0, .12, .7, 'hit']]],
+  laser: ['Laser', .4, 'Interface', [['t', 'sawtooth', 2000, 200, 0, .35, .4, 'hit']]],
+  zap: ['Zap', .3, 'Interface', [['t', 'square', 1500, 80, 0, .25, .35, 'hit'], ['n', 'highpass', 3000, 3000, 1, 0, .1, .3, 'hit']]],
+  powerup: ['Power up', .9, 'Interface', [['a', 'square', [262, 330, 392, 523, 659, 784], .12, .14, .18]]],
+  powerdown: ['Power down', 1, 'Interface', [['t', 'sawtooth', 800, 60, 0, 1, .25, 'down']]],
+  teleport: ['Teleport', 1, 'Interface', [['t', 'sine', 300, 2400, 0, .5, .3, 'mid'], ['t', 'sine', 2400, 300, .5, .5, .3, 'mid']], { v: .4 }],
+  countbeep: ['Countdown beep', .4, 'Interface', [['t', 'sine', 1000, 1000, 0, .25, .5, 'flat']]],
+  clocktick: ['Clock tick', 2, 'Interface', [['r', 4, .5, ['n', 'bandpass', 3500, 3500, 6, 0, .03, .9, 'hit']]]],
+  staticfx: ['Static burst', .6, 'Interface', [['n', 'highpass', 1000, 1000, .5, 0, .6, .5, 'flat']]],
+  stutter: ['Data stutter', .7, 'Interface', [['r', 7, .1, ['t', 'square', 600, 580, 0, .06, .25, 'hit']], ['r', 7, .1, ['n', 'bandpass', 2500, 2500, 2, .05, .04, .4, 'hit']]]],
+  sparklefx: ['Sparkle', 1.4, 'Magic', [['a', 'sine', [2093, 2637, 3136, 2349, 2794, 3520, 2637, 4186], .11, .35, .15]], { v: .5 }],
+  chime: ['Chime', 2, 'Magic', [['t', 'sine', 880, 880, 0, 1.8, .35, 'down'], ['t', 'sine', 1760, 1760, 0, 1.2, .15, 'down'], ['t', 'sine', 2640, 2640, 0, .8, .08, 'down']], { v: .3 }],
+  fairy: ['Fairy dust', 1.6, 'Magic', [['a', 'triangle', [1760, 2217, 2637, 3520, 2960, 3951, 4699], .1, .5, .12], ['n', 'highpass', 7000, 9000, 1, 0, 1.4, .12, 'mid']], { v: .6 }],
+  bell: ['Bell', 2.4, 'Magic', [['t', 'sine', 660, 660, 0, 2.3, .4, 'down'], ['t', 'sine', 1690, 1690, 0, 1.3, .18, 'down'], ['t', 'sine', 2700, 2700, 0, .7, .1, 'down']]],
+  wand: ['Magic wand', 1.2, 'Magic', [['t', 'sine', 600, 3000, 0, .5, .25, 'mid'], ['a', 'sine', [2349, 2794, 3136, 3520], .1, .4, .15]], { v: .5 }],
+  kick: ['Kick', .5, 'Drums', [['t', 'sine', 150, 42, 0, .45, 1, 'hit']]],
+  snare: ['Snare', .3, 'Drums', [['n', 'bandpass', 1900, 1900, .9, 0, .22, .8, 'hit'], ['t', 'triangle', 190, 160, 0, .12, .4, 'hit']]],
+  clap: ['Clap', .35, 'Drums', [['r', 3, .012, ['n', 'bandpass', 1500, 1500, 1.2, 0, .02, .7, 'hit']], ['n', 'bandpass', 1300, 1300, 1, .035, .25, .7, 'hit']], { v: .25 }],
+  hihat: ['Hi-hat', .12, 'Drums', [['n', 'highpass', 8000, 8000, 1, 0, .08, .6, 'hit']]],
+  crash: ['Cymbal crash', 2, 'Drums', [['n', 'highpass', 5000, 3000, .5, 0, 1.9, .6, 'hit']]],
+  roll: ['Drum roll', 1.6, 'Drums', [['r', 24, .06, ['n', 'bandpass', 1900, 1900, .9, 0, .08, .45, 'hit']]]],
+  tom: ['Tom fill', .9, 'Drums', [['t', 'sine', 220, 120, 0, .2, .8, 'hit'], ['t', 'sine', 170, 90, .22, .2, .8, 'hit'], ['t', 'sine', 130, 70, .44, .35, .9, 'hit']]],
+  rimshot: ['Ba-dum-tss', 1.4, 'Drums', [['t', 'sine', 200, 120, 0, .15, .8, 'hit'], ['t', 'sine', 160, 90, .2, .18, .8, 'hit'], ['n', 'highpass', 6000, 3000, .5, .42, .9, .5, 'hit']]],
+  drop: ['Water drop', .4, 'Nature', [['t', 'sine', 600, 1800, 0, .08, .6, 'hit'], ['t', 'sine', 1200, 500, .08, .2, .2, 'hit']]],
+  splash: ['Splash', 1, 'Nature', [['n', 'bandpass', 800, 3000, .6, 0, .9, .8, 'hit']]],
+  wind: ['Wind gust', 2.5, 'Nature', [['n', 'bandpass', 300, 900, 1.5, 0, 2.5, .6, 'mid']]],
+  thunder: ['Thunder', 3, 'Nature', [['n', 'lowpass', 800, 100, .6, 0, 2.9, 1, 'hit'], ['t', 'sine', 60, 30, 0, 2.5, .5, 'hit']], { v: .5 }],
+  rainfx: ['Rain', 3, 'Nature', [['n', 'highpass', 3000, 3000, .4, 0, 3, .35, 'flat']]],
+  boing: ['Boing', .7, 'Fun', [['t', 'sine', 120, 520, 0, .6, .6, 'down']]],
+  whistleup: ['Slide whistle up', .8, 'Fun', [['t', 'sine', 500, 2000, 0, .8, .3, 'flat']]],
+  whistledown: ['Slide whistle down', .8, 'Fun', [['t', 'sine', 2000, 450, 0, .8, .3, 'flat']]],
+  cartoonpop: ['Cartoon pop', .25, 'Fun', [['t', 'sine', 300, 1600, 0, .08, .8, 'hit'], ['n', 'bandpass', 2000, 2000, 2, 0, .05, .4, 'hit']]],
+  scratch: ['Record scratch', .6, 'Fun', [['n', 'bandpass', 600, 2400, 3, 0, .25, .8, 'mid'], ['n', 'bandpass', 2400, 500, 3, .25, .3, .8, 'mid']]],
+  tada: ['Ta-da', 1.5, 'Fun', [['a', 'sawtooth', [523, 659, 784, 1046], .06, 1.2, .12]], { v: .3 }],
+  fail: ['Fail trombone', 2, 'Fun', [['t', 'sawtooth', 392, 370, 0, .4, .2, 'flat'], ['t', 'sawtooth', 370, 349, .45, .4, .2, 'flat'], ['t', 'sawtooth', 349, 330, .9, .4, .2, 'flat'], ['t', 'sawtooth', 330, 280, 1.35, .6, .2, 'flat']]],
+  cashreg: ['Cash register', .8, 'Fun', [['t', 'square', 1600, 1600, 0, .08, .3, 'hit'], ['t', 'sine', 2400, 2400, .1, .6, .35, 'down'], ['n', 'bandpass', 3000, 3000, 3, 0, .06, .5, 'hit']]],
+  camflash: ['Camera flash', 1.2, 'Fun', [['t', 'sine', 400, 4000, 0, .9, .08, 'up'], ['n', 'bandpass', 2500, 2500, 1, .95, .1, .9, 'hit']]]
+};
+const SFX_CAT = {};
+for (const k of Object.keys(SFX)) SFX_CAT[k] = ['whoosh', 'swipe', 'riser', 'impact', 'glitch'].includes(k) ? 'Transition' : 'Basic';
+for (const [k, [n, d, cat]] of Object.entries(SFX_X)) { SFX[k] = [n, d]; SFX_CAT[k] = cat; }
+function makeIR(oc, sec) { const n = Math.ceil(oc.sampleRate * sec), b = oc.createBuffer(1, n, oc.sampleRate), d = b.getChannelData(0); for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, 3); return b; }
+async function renderSfxX(kind) {
+  const [, dur, , ops, opt = {}] = SFX_X[kind], sr = 44100, tail = opt.v ? 1.2 : 0, oc = new OfflineAudioContext(1, Math.ceil(sr * (dur + tail)), sr);
+  const out = oc.createGain(); out.gain.value = .9; out.connect(oc.destination);
+  if (opt.v) { const cv2 = oc.createConvolver(), wet = oc.createGain(); cv2.buffer = makeIR(oc, 1.4); wet.gain.value = opt.v; out.connect(cv2); cv2.connect(wet); wet.connect(oc.destination); }
+  const nb = noiseBuf(oc, Math.min(4, dur + .2));
+  const env = (g, t, len, pk, sh) => {
+    const G = g.gain; G.setValueAtTime(0, t);
+    if (sh === 'hit' || sh === 'down') { G.linearRampToValueAtTime(pk, t + (sh === 'hit' ? .004 : .01)); G.exponentialRampToValueAtTime(.0005, t + len); }
+    else if (sh === 'up') { G.linearRampToValueAtTime(pk, t + len * .92); G.linearRampToValueAtTime(0, t + len); }
+    else if (sh === 'flat') { G.linearRampToValueAtTime(pk, t + .01); G.setValueAtTime(pk, t + len * .85); G.linearRampToValueAtTime(0, t + len); }
+    else { G.linearRampToValueAtTime(pk, t + len * .55); G.linearRampToValueAtTime(0, t + len); }
+  };
+  const run = (op, dt) => {
+    if (op[0] === 'r') { for (let i = 0; i < op[1]; i++) run(op[3], dt + i * op[2]); return; }
+    if (op[0] === 'a') { op[2].forEach((f, i) => run(['t', op[1], f, f, i * op[3], op[4], op[5], 'hit'], dt)); return; }
+    const g = oc.createGain();
+    if (op[0] === 'n') {
+      const [, type, f0, f1, q, t0, len, pk, sh] = op, t = t0 + dt, n = oc.createBufferSource(), fl = oc.createBiquadFilter();
+      n.buffer = nb; fl.type = type; fl.Q.value = q; fl.frequency.setValueAtTime(f0, t); fl.frequency.exponentialRampToValueAtTime(f1, t + len);
+      env(g, t, len, pk, sh); n.connect(fl); fl.connect(g); g.connect(out); n.start(t, Math.random() * .1); n.stop(t + len + .02);
+    } else {
+      const [, wave, f0, f1, t0, len, pk, sh] = op, t = t0 + dt, o = oc.createOscillator();
+      o.type = wave; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(Math.max(1, f1), t + len);
+      env(g, t, len, pk, sh); o.connect(g); g.connect(out); o.start(t); o.stop(t + len + .02);
+    }
+  };
+  ops.forEach(o => run(o, 0));
+  const buf = await oc.startRendering();
+  if (opt.rev) buf.getChannelData(0).reverse();
+  return buf;
+}
+// How far into a sound its main moment is, so a transition sound lands exactly on the cut.
+function sfxLead(k) {
+  const x = SFX_X[k]; if (!x) return { whoosh: .44, swipe: .05, riser: 2.05, glitch: .1 }[k] || 0;
+  const o = x[3][0]; if (o[0] !== 'n' && o[0] !== 't') return 0;
+  const [t0, len, sh] = o[0] === 'n' ? [o[5], o[6], o[8]] : [o[4], o[5], o[7]];
+  return t0 + len * (sh === 'mid' ? .55 : sh === 'up' ? .92 : 0);
+}
+/* Transition sounds belong to the cut (clip.trSfx): the engine plays them as the playhead crosses it, so they move
+   with the clips and are recorded in the export. */
+const trBufs = new Map();
+function trBuf(k) {
+  const b = trBufs.get(k); if (b instanceof AudioBuffer) return b;
+  if (!b) trBufs.set(k, renderSfx(k).then(x => { trBufs.set(k, x); return x; }).catch(() => { trBufs.delete(k); return null; }));
+  return null;
+}
+const prepTrSounds = () => Promise.all([...new Set(P.clips.map(c => c.trSfx).filter(Boolean))].map(k => { trBuf(k); return trBufs.get(k); }));
+function fireCuts(a, b) {
+  if (!P || !(b > a) || b - a > .4 || !AC) return;
+  layout();
+  for (const c of P.clips) {
+    if (!c.trSfx) continue;
+    const at = c._start + clipLen(c) - sfxLead(c.trSfx); if (at <= a || at > b) continue;
+    const buf = trBuf(c.trSfx); if (!buf) continue;
+    const s = AC.createBufferSource(), g = AC.createGain(); s.buffer = buf; g.gain.value = c.trVol == null ? .6 : c.trVol;
+    s.connect(g); g.connect(master); s.start(AC.currentTime, Math.min(buf.duration - .01, Math.max(0, b - at)));
+  }
+}
+function playSfxSample(k) { renderSfx(k).then(buf => { const ac = actx(); ac.resume(); const s = ac.createBufferSource(); s.buffer = buf; s.connect(master); s.start(); }).catch(() => {}); }
+
+/* ================= More animations ================= */
+const backOut = e => 1 + 2.70158 * Math.pow(e - 1, 3) + 1.70158 * Math.pow(e - 1, 2);
+const elasticOut = e => e <= 0 ? 0 : e >= 1 ? 1 : 1 - Math.pow(2, -10 * e) * Math.cos(e * Math.PI * 3.3);
+const bounceOut = e => { const n = 7.5625, d = 2.75; if (e < 1 / d) return n * e * e; if (e < 2 / d) return n * (e -= 1.5 / d) * e + .75; if (e < 2.5 / d) return n * (e -= 2.25 / d) * e + .9375; return n * (e -= 2.625 / d) * e + .984375; };
+// Clip in/out animations. p goes from 1 (hidden) to 0 (in place); sx/sy squeeze the picture for a 3D turn.
+const ANIM_X = {
+  flip3d: ['3D flip', (R, p) => { R.sx *= Math.max(.02, Math.cos(p * Math.PI / 2)); R.o *= 1 - p * .3; }],
+  flipv3d: ['3D flip up', (R, p) => { R.sy *= Math.max(.02, Math.cos(p * Math.PI / 2)); R.o *= 1 - p * .3; }],
+  cube3d: ['3D cube', (R, p) => { R.sx *= Math.max(.02, 1 - p); R.dx -= p * .5; R.o *= 1 - p * .4; }],
+  door3d: ['3D door', (R, p) => { R.sx *= Math.max(.02, 1 - p); R.dx -= p * .5; R.r -= p * 6; }],
+  roll3d: ['3D roll', (R, p) => { R.r += 180 * p; R.sy *= Math.max(.05, 1 - p * .8); R.o *= 1 - p; }],
+  swing3d: ['3D swing', (R, p) => { R.sy *= Math.max(.02, Math.cos(p * Math.PI / 2)); R.dy -= p * .3; R.r += p * 10; }],
+  twirl3d: ['3D twirl', (R, p) => { R.sx *= Math.max(.02, Math.abs(Math.cos(p * Math.PI * 1.5))); R.r += p * 30; R.o *= 1 - p * .5; }],
+  flipspin: ['Flip spin', (R, p) => { R.sx *= Math.max(.02, Math.abs(Math.cos(p * Math.PI))); R.r += p * 180; R.o *= 1 - p * .5; }],
+  unfold: ['Unfold', (R, p) => { R.sy *= Math.max(.02, 1 - p); }],
+  tumble: ['Tumble', (R, p) => { R.r += 120 * p; R.dy += p * .4; R.s *= 1 - p * .4; R.o *= 1 - p; }],
+  elastic: ['Elastic', (R, p) => { R.s *= Math.max(.01, elasticOut(1 - p)); }],
+  swirl: ['Swirl', (R, p) => { R.r += 360 * p; R.s *= Math.max(.02, 1 - p * .9); R.o *= 1 - p; }],
+  stretchx: ['Stretch', (R, p) => { R.sx *= 1 + p * 2; R.sy *= 1 - p * .5; R.o *= 1 - p; }],
+  squash: ['Squash', (R, p) => { R.sy *= 1 + p * 2; R.sx *= 1 - p * .5; R.o *= 1 - p; }],
+  glitchin: ['Glitch', (R, p, local) => { R.dx += (rnd2(local * 60) - .5) * .2 * p; R.o *= rnd2(local * 45 + 3) > p * .7 ? 1 : .15; }],
+  shutter: ['Shutter', (R, p) => { R.o *= Math.floor((1 - p) * 4) / 4; }],
+  zoomrot: ['Zoom rotate', (R, p) => { R.s *= Math.max(.02, 1 - p * .8); R.r -= p * 90; R.o *= 1 - p * .5; }],
+  peek: ['Peek', (R, p) => { R.dy += p * .15; R.o *= 1 - p; }],
+  skid: ['Skid', (R, p) => { R.dx -= p * .6; R.r -= p * 15; R.o *= 1 - p * .5; }],
+  dropbounce: ['Drop bounce', (R, p) => { R.dy -= (1 - bounceOut(1 - p)) * .7; }],
+  poprot: ['Pop rotate', (R, p) => { R.s *= Math.max(.02, 1 - p * .9 + Math.sin(p * Math.PI) * .15); R.r += p * 45; R.o *= 1 - p; }],
+  pushin: ['Push in', (R, p) => { R.s *= 1 + p * .6; R.blur += 20 * p; R.o *= 1 - p; }],
+  sink: ['Sink', (R, p) => { R.s *= 1 - p * .3; R.dy += p * .2; R.o *= 1 - p; }],
+  lens: ['Lens', (R, p) => { R.s *= 1 + p * .8; R.blur += 30 * p; R.o *= 1 - p * .8; }],
+  slidebounce: ['Slide bounce', (R, p) => { R.dx -= (1 - backOut(1 - p)) * .9; }],
+  risebounce: ['Rise bounce', (R, p) => { R.dy += (1 - backOut(1 - p)) * .6; }],
+  spiral: ['Spiral', (R, p) => { R.r += 270 * p; R.s *= Math.max(.02, 1 - p); R.dx += p * .3 * Math.cos(p * 6); R.dy += p * .3 * Math.sin(p * 6); }],
+  zoomwhip: ['Zoom whip', (R, p) => { R.s *= 1 + p * 2; R.blur += 40 * p; R.o *= 1 - p; }],
+  tiltin: ['Tilt', (R, p) => { R.r -= 25 * p; R.dx -= p * .3; R.o *= 1 - p; }],
+  floatin: ['Float in', (R, p) => { R.dy += p * .08; R.blur += 10 * p; R.o *= 1 - p; }],
+  cinematic: ['Cinematic', (R, p) => { R.s *= 1 + p * .15; R.blur += 8 * p; R.o *= 1 - p; }],
+  bounce3d: ['3D bounce', (R, p) => { R.sy *= 1 - p * .6 + Math.sin(p * Math.PI) * .2; R.dy += p * .4; R.o *= 1 - p * .3; }]
+};
+// Loops: run for the whole clip. u is how far through the clip it is (0 to 1).
+const ANIM_LOOP_X = {
+  float3d: ['3D float', (R, l) => { R.sx *= 1 + .06 * Math.sin(l * 2); R.dy += .01 * Math.sin(l * 1.3); }],
+  sway3d: ['3D sway', (R, l) => { R.sx *= .93 + .07 * Math.cos(l * 2.4); R.r += 3 * Math.sin(l * 2.4); }],
+  fliploop: ['Flip loop', (R, l) => { R.sx *= Math.cos(l * 1.6); }],
+  rock: ['Rock', (R, l) => { R.r += 6 * Math.sin(l * 3); }],
+  shakehard: ['Hard shake', (R, l) => { R.dx += (rnd2(l * 30) - .5) * .05; R.dy += (rnd2(l * 30 + 9) - .5) * .05; }],
+  zoompulse: ['Zoom pulse', (R, l) => { R.s *= 1 + .07 * Math.abs(Math.sin(l * 3)); }],
+  driftl: ['Drift left', (R, l, len) => { const u = l / Math.max(.1, len); R.s *= 1.08; R.dx += .04 - .08 * u; }],
+  driftr: ['Drift right', (R, l, len) => { const u = l / Math.max(.1, len); R.s *= 1.08; R.dx -= .04 - .08 * u; }],
+  tiltloop: ['Tilt loop', (R, l) => { R.r += 2 * Math.sin(l * 1.2); R.s *= 1.04; }],
+  glitchloop: ['Glitch loop', (R, l) => { if (rnd2(l * 15) > .9) { R.dx += (rnd2(l * 77) - .5) * .06; R.o *= .7; } }],
+  strobe: ['Strobe', (R, l) => { R.o *= Math.floor(l * 8) % 2 ? .55 : 1; }],
+  bounceloop: ['Bounce', (R, l) => { R.dy -= .03 * Math.abs(Math.sin(l * 3.5)); }],
+  spin: ['Slow spin', (R, l) => { R.r += l * 12; R.s *= 1.15; }],
+  figure8: ['Figure eight', (R, l) => { R.dx += .025 * Math.sin(l * 1.5); R.dy += .015 * Math.sin(l * 3); }],
+  wave: ['Wave', (R, l) => { R.dy += .015 * Math.sin(l * 4); R.r += 1.5 * Math.cos(l * 4); }],
+  parallax: ['Parallax', (R, l) => { R.s *= 1.08; R.dx += .03 * Math.sin(l * .6); }],
+  heartfast: ['Fast heartbeat', (R, l) => { R.s *= 1 + .06 * Math.pow(Math.max(0, Math.sin(l * 9)), 4); }],
+  squashloop: ['Squash loop', (R, l) => { R.sx *= 1 + .05 * Math.sin(l * 5); R.sy *= 1 - .05 * Math.sin(l * 5); }],
+  pushinloop: ['Push in', (R, l, len) => { R.s *= 1 + .2 * l / Math.max(.1, len); }],
+  pulloutloop: ['Pull out', (R, l, len) => { R.s *= 1.2 - .2 * l / Math.max(.1, len); }]
+};
+for (const k in ANIM_X) ANIM_IN[k] = ANIM_X[k][0];
+for (const k in ANIM_LOOP_X) ANIM_COMBO[k] = ANIM_LOOP_X[k][0];
+
+/* Text animations. st holds how the text is drawn this frame; letters(i, n, local) moves single letters. */
+const TEXT_ANIM_X = {
+  flip3d: ['3D flip', (s, l) => { const u = easeOut(l / .6); s.sx *= Math.max(.02, Math.sin(u * Math.PI / 2)); s.alpha *= Math.min(1, u * 2); }],
+  flipv3d: ['3D flip up', (s, l) => { const u = easeOut(l / .6); s.sy *= Math.max(.02, Math.sin(u * Math.PI / 2)); s.alpha *= Math.min(1, u * 2); }],
+  roll3d: ['3D roll', (s, l) => { const u = easeOut(l / .7); s.rot -= (1 - u) * 90; s.sy *= Math.max(.05, u); s.alpha *= u; }],
+  zoom3d: ['3D zoom', (s, l) => { const u = easeOut(l / .6); s.sc *= 1 + (1 - u) * 2.2; s.alpha *= u; s.blur = (1 - u) * .15; }],
+  elastic: ['Elastic', (s, l) => { s.sc *= Math.max(.01, elasticOut(clamp(l / .9, 0, 1))); }],
+  blurin: ['Blur in', (s, l) => { const u = easeOut(l / .8); s.blur = (1 - u) * .25; s.alpha *= u; }],
+  trackin: ['Tracking in', (s, l) => { const u = easeOut(l / 1.2); s.track = (1 - u) * 60; s.alpha *= u; }],
+  spread: ['Slow spread', (s, l) => { s.track = Math.min(40, l * 6); s.alpha *= clamp(l / .5, 0, 1); }],
+  riseup: ['Rise up', (s, l, len, t, W, H) => { const u = easeOut(l / .6); s.dy += (1 - u) * H * .08; s.alpha *= u; }],
+  slidel: ['Slide from left', (s, l, len, t, W) => { const u = easeOut(l / .6); s.dx -= (1 - u) * W * .35; s.alpha *= u; }],
+  slider: ['Slide from right', (s, l, len, t, W) => { const u = easeOut(l / .6); s.dx += (1 - u) * W * .35; s.alpha *= u; }],
+  stamp: ['Stamp', (s, l, len, t, W) => { const u = clamp(l / .22, 0, 1); s.sc *= 1 + (1 - u) * 1.8; s.alpha *= u; if (u >= 1 && l < .5) s.dx += (rnd2(t * 60) - .5) * W * .012; }],
+  glitch2: ['Glitch shift', (s, l, len, t, W) => { if (l < .8 || rnd2(t * 9) > .95) { s.dx += (rnd2(t * 40) - .5) * W * .04; s.alpha *= rnd2(t * 31) > .25 ? 1 : .3; } }],
+  heartbeat: ['Heartbeat', (s, l) => { s.sc *= 1 + .08 * Math.pow(Math.max(0, Math.sin(l * 7)), 6); }],
+  floaty: ['Float', (s, l, len, t, W, H) => { s.dy += Math.sin(l * 2) * H * .008; s.alpha *= clamp(l / .4, 0, 1); }],
+  neonpulse: ['Neon pulse', (s, l) => { s.alpha *= .72 + .28 * Math.sin(l * 6); }],
+  wave: ['Wave letters', s => { s.letters = (j, n, l) => ({ dy: Math.sin(l * 5 - j * .6) * .12 }); }],
+  cascade: ['Cascade', s => { s.letters = (j, n, l) => { const u = clamp((l - j * .06) / .35, 0, 1); return { dy: -(1 - easeOut(u)) * 1.2, a: u }; }; }],
+  typepop: ['Pop letters', s => { s.letters = (j, n, l) => { const u = clamp((l - j * .05) / .3, 0, 1); return { s: u < 1 ? Math.max(0, backOut(u)) : 1, a: u > 0 ? 1 : 0 }; }; }],
+  fadeletters: ['Fade letters', s => { s.letters = (j, n, l) => ({ a: clamp((l - j * .05) / .3, 0, 1) }); }],
+  jump: ['Jumping letters', s => { s.letters = (j, n, l) => { const u = clamp((l - j * .05) / .4, 0, 1); return { dy: -Math.sin(u * Math.PI) * .5 }; }; }],
+  spinletters: ['Spin letters', s => { s.letters = (j, n, l) => { const u = clamp((l - j * .05) / .45, 0, 1); return { r: (1 - easeOut(u)) * Math.PI, s: easeOut(u), a: u }; }; }],
+  dropletters: ['Drop letters', s => { s.letters = (j, n, l) => { const u = clamp((l - j * .05) / .6, 0, 1); return { dy: -(1 - bounceOut(u)) * 1.5, a: u > 0 ? 1 : 0 }; }; }],
+  rainbow: ['Rainbow', s => { s.letters = (j, n, l) => ({ col: `hsl(${Math.round(j * 40 + l * 120) % 360},90%,62%)` }); }],
+  shimmer: ['Shimmer', s => { s.letters = (j, n, l) => { const at = ((l * .9) % 1.6) / 1.2 * (n + 4) - 2; return Math.abs(j - at) < 1.2 ? { col: '#ffffff', s: 1.08 } : {}; }; }]
+};
+for (const k in TEXT_ANIM_X) ANIMS[k] = TEXT_ANIM_X[k][0];
+const GRADS = { gold: ['#fff3b0', '#e2b33c', '#8a5a00'], sunset: ['#ffd36e', '#ff5e62'], ocean: ['#5ee7ff', '#1a5cff'], neon: ['#ff4ecd', '#7b5cff'], chrome: ['#ffffff', '#9aa3ad', '#eef1f4', '#5d6670'], fire: ['#fff200', '#ff7a00', '#e01b1b'], mint: ['#d4ffea', '#2ee59d'], royal: ['#e0ccff', '#5b2bd6'] };
+function gradFill(ctx, key, y, px) { const cols = GRADS[key], g = ctx.createLinearGradient(0, y - px * .5, 0, y + px * .5); cols.forEach((c, i) => g.addColorStop(i / (cols.length - 1), c)); return g; }
+const gradCss = key => `linear-gradient(180deg,${GRADS[key].join(',')})`;
+function shadeOf(col) { const m = /^#([0-9a-f]{6})$/i.exec(col || ''); if (!m) return '#1a1a1a'; const v = parseInt(m[1], 16), k = .35; return `rgb(${Math.round((v >> 16) * k)},${Math.round((v >> 8 & 255) * k)},${Math.round((v & 255) * k)})`; }
+// Ready-made professional titles and write-ups.
+Object.assign(TEXT_TEMPLATES, {
+  cine: ['Cinematic title', { text: 'THE JOURNEY', font: 'light', size: 7, color: '#ffffff', stroke: false, shadow: true, spacing: 40, anim: 'trackin' }],
+  goldt: ['Gold 3D', { text: 'GOLDEN HOUR', font: 'black', size: 9, color: '#e2b33c', grad: 'gold', depth: .7, stroke: false, anim: 'zoom3d' }],
+  chrome: ['Chrome 3D', { text: 'LEGENDARY', font: 'black', size: 10, color: '#c9d0d8', grad: 'chrome', depth: 1, stroke: false, anim: 'flip3d' }],
+  retro: ['Retro wave', { text: 'RETRO WAVE', font: 'black', size: 9, color: '#ff4ecd', grad: 'neon', depth: 1, stroke: false, anim: 'roll3d' }],
+  fire: ['Fire title', { text: 'GAME DAY', font: 'black', size: 11, color: '#ff7a00', grad: 'fire', depth: .9, stroke: false, anim: 'stamp' }],
+  royal: ['Royal 3D', { text: 'NO EXCUSES', font: 'black', size: 9, color: '#a77bff', grad: 'royal', depth: .8, stroke: false, anim: 'elastic' }],
+  luxury: ['Luxury', { text: 'LUXURY', font: 'light', size: 8, color: '#e2b33c', grad: 'gold', stroke: false, shadow: true, spacing: 50, anim: 'trackin' }],
+  chapter: ['Chapter', { text: 'CHAPTER ONE\nThe beginning', font: 'serif', size: 6, color: '#ffffff', stroke: false, shadow: true, spacing: 12, anim: 'fadeletters' }],
+  soon: ['Coming soon', { text: 'COMING SOON', font: 'cond', size: 7.5, color: '#ffffff', stroke: false, shadow: true, spacing: 30, anim: 'blurin' }],
+  sale: ['Mega sale', { text: 'MEGA SALE\n50% OFF', font: 'black', size: 7, color: '#ffffff', box: true, boxColor: '#e11d2e', stroke: false, anim: 'stamp' }],
+  newvid: ['New video', { text: 'NEW VIDEO', font: 'black', size: 7, color: '#111111', box: true, boxColor: '#ffd23f', stroke: false, anim: 'elastic' }],
+  follow: ['Like · share · follow', { text: 'LIKE · SHARE · FOLLOW', font: 'classic', size: 4.6, color: '#ffffff', box: true, boxColor: '#111111', stroke: false, anim: 'cascade', y: .82 }],
+  step: ['Step', { text: 'STEP 1\nMix everything', font: 'classic', size: 4.4, color: '#ffffff', box: true, boxColor: '#0b3d91', stroke: false, anim: 'slidel', y: .82 }],
+  place: ['Place name', { text: 'Lagos, Nigeria', font: 'hand', size: 8, color: '#ffffff', stroke: false, shadow: true, anim: 'riseup' }],
+  pin: ['Location pin', { text: '📍 Paris, France', font: 'classic', size: 4.6, color: '#ffffff', box: true, boxColor: '#111111', stroke: false, anim: 'riseup', y: .85 }],
+  day: ['Day counter', { text: 'DAY 01', font: 'mono', size: 6, color: '#ffffff', box: true, boxColor: '#000000', stroke: false, anim: 'typepop' }],
+  quote2: ['Elegant quote', { text: '“Dream big. Start small.”', font: 'serif', size: 6, color: '#ffffff', stroke: false, shadow: true, anim: 'fadeletters' }],
+  before: ['Before', { text: 'BEFORE', font: 'black', size: 6, color: '#ffffff', box: true, boxColor: '#111111', stroke: false, anim: 'slidel', x: .3, y: .12 }],
+  after: ['After', { text: 'AFTER', font: 'black', size: 6, color: '#111111', box: true, boxColor: '#ffffff', stroke: false, anim: 'slider', x: .7, y: .12 }],
+  episode: ['Episode', { text: 'EPISODE 1', font: 'cond', size: 8, color: '#5ee7ff', grad: 'ocean', stroke: false, spacing: 20, anim: 'trackin' }],
+  bday: ['Birthday', { text: 'Happy Birthday!', font: 'hand', size: 9, color: '#ffd36e', grad: 'sunset', stroke: false, shadow: true, anim: 'wave' }],
+  wedding: ['Wedding', { text: 'Forever & Always', font: 'hand', size: 8.5, color: '#e2b33c', grad: 'gold', stroke: false, shadow: true, anim: 'blurin' }],
+  howto: ['How to', { text: 'HOW TO…', font: 'black', size: 8, color: '#ffffff', box: true, boxColor: '#1a5cff', stroke: false, anim: 'elastic' }],
+  creator: ['Creator name', { text: 'Your Name\nCreator · Editor', font: 'cond', size: 4.4, color: '#ffffff', box: true, boxColor: '#151515', stroke: false, anim: 'slidel', x: .32, y: .84 }],
+  tag: ['Hashtag', { text: '#trending', font: 'black', size: 7, color: '#36d7ff', glow: true, stroke: false, anim: 'jump' }],
+  thanks: ['Thanks for watching', { text: 'Thanks for watching', font: 'serif', size: 6, color: '#ffffff', stroke: false, shadow: true, anim: 'fadeletters' }],
+  news: ['Breaking news', { text: 'BREAKING NEWS\nDeveloping story', font: 'cond', size: 4.8, color: '#ffffff', box: true, boxColor: '#e11d2e', stroke: false, anim: 'slider', y: .84 }],
+  wait: ['Wait for it', { text: 'WAIT FOR IT…', font: 'classic', size: 7, color: '#ffffff', stroke: true, anim: 'typepop' }],
+  party: ['Party', { text: 'PARTY TIME', font: 'black', size: 9, color: '#ffffff', stroke: true, anim: 'rainbow' }],
+  shine: ['Shine', { text: 'SHINE BRIGHT', font: 'black', size: 8, color: '#e2b33c', grad: 'gold', stroke: false, shadow: true, anim: 'shimmer' }]
+});
+
+/* Transition sheet: every transition by family, with a moving sample; tap one to try it on the real cut.
+   A sound can be put on the cut too, each with its own sample. */
+const SFX_TR = () => Object.keys(SFX).filter(k => SFX_CAT[k] === 'Transition' || ['boom', 'cinehit', 'risershort', 'downlifter', 'punch', 'thud', 'shimmer', 'flashhit', 'tapestop', 'rewindfx', 'pop', 'shutter'].includes(k));
+function transitionSheet(it) {
+  const rows = Object.entries(TRANS_CATS).map(([cat, keys]) => `<div class="lab">${cat}</div><div class="chips">${keys.map(k => `<button type="button" class="chip" data-v="${k}" aria-pressed="${k === it.transition}">${TRANSITIONS[k]}</button>`).join('')}</div>`).join('');
+  openSheet('Transition to next clip', vizBox('trDemo', 130, 'Clip A → Clip B') + `<div class="chips"><button type="button" class="chip" data-v="none" aria-pressed="${it.transition === 'none'}">No transition</button></div>${rows}
+    <div class="lab">Sound on the cut</div><div class="chips" id="trSnd"><button type="button" class="chip" data-s="" aria-pressed="${!it.trSfx}">No sound</button>${SFX_TR().map(k => `<button type="button" class="chip" data-s="${k}" aria-pressed="${k === it.trSfx}">${icon('play')}${SFX[k][0]}</button>`).join('')}</div>
+    ${slider('trVol', 'Sound volume', 0, 1.5, .05, it.trVol == null ? .6 : it.trVol, pct)}
+    <p class="note">Tap a transition or a sound to try it: the sample above and the preview play it. ✓ Apply keeps it; Apply to all puts it on every cut.</p>`,
+  r => {
+    transitionDemo($('#trDemo', r), () => it.transition);
+    r.addEventListener('click', e => {
+      const s = e.target.closest('[data-s]');
+      if (s) { it.trSfx = s.dataset.s || null; $$('#trSnd [data-s]', r).forEach(x => x.setAttribute('aria-pressed', String(x === s))); if (it.trSfx) { trBuf(it.trSfx); playSfxSample(it.trSfx); } commit(); return; }
+      const b = e.target.closest('[data-v]'); if (!b) return;
+      it.transition = b.dataset.v; $$('[data-v]', r).forEach(x => x.setAttribute('aria-pressed', String(x === b))); commit(); previewCut(it);
+    });
+    bindSlider(r, 'trVol', pct, v => { it.trVol = v; });
+  });
+}
+function previewCut(it) { layout(); seekTo(Math.max(0, it._start + clipLen(it) - .7)); play(); setTimeout(() => { if (playing) pause(); }, 1300); }
+function sfxSheet() {
+  const cats = {};
+  for (const k of Object.keys(SFX)) { const c = SFX_CAT[k] || 'Basic'; (cats[c] = cats[c] || []).push(k); }
+  const row = k => { const [n, d] = SFX[k]; return `<div class="sfx"><button type="button" class="pl" data-play="${k}" aria-label="Play ${esc(n)}">${icon('play')}</button><span>${esc(n)}<br><small class="note">${d < 1 ? Math.round(d * 1000) + ' ms' : d.toFixed(1) + ' s'}</small></span><button type="button" class="add" data-add="${k}">Add</button></div>`; };
+  openSheet(`Sound effects · ${Object.keys(SFX).length}`, Object.entries(cats).map(([c, keys]) => `<div class="lab">${c}</div><div class="sfx-grid">${keys.map(row).join('')}</div>`).join('') + '<p class="note">Tap ▶ to hear a sound first. Add puts it at the playhead on the audio track; tap it there to move, trim or change its volume.</p>',
+  r => r.addEventListener('click', async e => {
+    const pb = e.target.closest('[data-play]'), ab = e.target.closest('[data-add]');
+    if (pb) { playSfxSample(pb.dataset.play); return; }
+    if (!ab) return;
+    const k = ab.dataset.add;
+    let m = sfxMedia[k] && media[sfxMedia[k]];
+    if (!m) { const buf = await renderSfx(k); m = await addMediaRecord('audio', SFX[k][0], wavBlob(buf.getChannelData(0), buf.sampleRate), buf.duration); sfxMedia[k] = m.id; }
+    const a = addAudioItem(m, 'sfx', T); a.out = m.duration; a.volume = 1;
+    commit(); toast(`${SFX[k][0]} added at ${fmt(T)}`);
+  }));
+}
 
 window.splashBack = () => {
   if (!$('#busy').hidden) return true;
-  if (!$('#sheet').hidden) { closeSheet(); return true; }
+  if (!$('#sheet').hidden) { closeSheet(true); return true; }
   if (!$('#pro').hidden) { closePro(); return true; }
   if (P && sel) { select(null); return true; }
   if (P) { leaveEditor(); return true; }
@@ -3686,7 +4529,8 @@ window.splashBack = () => {
 };
 
 renderHome();
+resumeSession();
 renderAcct(); loadInfo(); refreshMe();
-window.__sc = { get P() { return P; }, set P(v) { P = v; }, addMediaRecord, newProject, makeClip, enterEditor, ensureWave, leaveEditor, get T() { return T; }, get sel() { return sel; }, media, els, layout, duration, clipAt, clipLen, srcAt, outAt, detectBeats, openTool, select, commit, draw, seekTo,
+window.__sc = { tables: () => ({ TRANSITIONS, ANIM_IN, ANIM_COMBO, ANIMS, FX, SFX, TEXT_TEMPLATES, REEL_STYLES }), get P() { return P; }, set P(v) { P = v; }, addMediaRecord, newProject, makeClip, enterEditor, ensureWave, leaveEditor, get T() { return T; }, get sel() { return sel; }, media, els, layout, duration, clipAt, clipLen, srcAt, outAt, detectBeats, openTool, select, commit, draw, seekTo,
   runDenoise, runStabilize, runAutoframe, runTrack, reverseClip, freezeFrame, detachAudio, autoReel, autoDuck, setTf, tfAt, ovTf, denoiseSignal, normalize, setFx, play, pause, applyLayout, renderSfx, exportFlow, openPro, checkPaid, get acct() { return acct; } };
 })();

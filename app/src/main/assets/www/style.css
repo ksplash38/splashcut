@@ -352,3 +352,34 @@ input[type=color]{width:44px;height:34px;border:1px solid var(--line);border-rad
 .t-main .blk.ending{background:linear-gradient(135deg,#1d1a14,#2a2418);border-color:#4a4434;justify-content:center}
 .t-main .blk.ending .lbl{position:relative;display:flex;align-items:center;gap:4px;background:none;color:var(--gold-2)}
 .blk.ending .lbl svg{width:13px;height:13px;flex:none}
+
+/* Quick bar over the preview: Split · Delete · ✕ */
+.qbar{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);z-index:6;display:flex;gap:6px;padding:5px;border-radius:24px;background:rgb(18 18 18 / .9);border:1px solid var(--line);box-shadow:0 8px 24px rgb(0 0 0 / .5);animation:qin .18s ease-out}
+.qbar[hidden]{display:none}
+.qbar button{display:inline-flex;align-items:center;gap:6px;min-height:38px;padding:0 14px;border-radius:19px;background:var(--panel-2);font-weight:700;font-size:13px}
+.qbar button svg.i{width:18px;height:18px}
+.qbar button.del{color:var(--bad)}
+.qbar button.x{padding:0 10px;background:transparent;color:var(--muted)}
+@keyframes qin{from{opacity:0;transform:translate(-50%,8px)}}
+
+/* Effect samples */
+.fxgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(76px,1fr));gap:8px}
+.fxt{display:grid;gap:4px;justify-items:center;font-size:11px;color:var(--muted);text-align:center;line-height:1.2}
+.fxt canvas{width:72px;height:96px;border-radius:10px;border:2px solid transparent;background:var(--panel-2)}
+.fxt.on{color:var(--text)}
+.fxt.on canvas{border-color:var(--gold);box-shadow:0 0 0 2px rgb(201 164 92 / .35)}
+
+/* Crop editor */
+.crop-ed canvas{display:block;width:100%;height:250px;border-radius:12px;touch-action:none;background:#0c0c0c}
+
+/* Voiceover countdown and take review */
+.rec-time.cd{font-size:64px;font-weight:800;color:var(--gold);line-height:1.1}
+.rec-time.pop{animation:cdpop .9s ease-out}
+@keyframes cdpop{from{transform:scale(1.7);opacity:.15}to{transform:scale(1);opacity:1}}
+.rec-btn.wait{opacity:.55;animation:recwait 1s ease-in-out infinite}
+@keyframes recwait{50%{transform:scale(.9)}}
+.rec-rev{display:flex;gap:8px;flex-wrap:wrap}
+.rec-rev .btn{flex:1;min-width:92px}
+.rec-rev[hidden],.rec-btn[hidden],#recOpts[hidden]{display:none}
+
+.chip svg.i{width:13px;height:13px;margin-right:3px;vertical-align:-2px;flex:none}
