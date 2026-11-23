@@ -383,3 +383,9 @@ input[type=color]{width:44px;height:34px;border:1px solid var(--line);border-rad
 .rec-rev[hidden],.rec-btn[hidden],#recOpts[hidden]{display:none}
 
 .chip svg.i{width:13px;height:13px;margin-right:3px;vertical-align:-2px;flex:none}
+
+.songlist{display:grid;gap:6px}
+.song{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:10px;background:var(--panel-2);border:1px solid var(--line);font-size:13px}
+.song span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#rSongs{display:grid;gap:10px}
+#rSongs[hidden]{display:none}

@@ -384,7 +384,7 @@ const DEF_TF = (s = 1) => ({ x: .5, y: .5, s, r: 0, o: 1, w: 1, h: 1 });
 function newProject(ratio) {
   const d = new Date();
   return { v: 2, id: uid(), name: 'Project ' + d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) + ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }),
-    ratio, bg: 'blur', ending: store.get('sc_ending', true) !== false, clips: [], layers: [], overlays: [], audio: [], beats: [], bpm: 0, duck: null, capStyle: 'classic', created: Date.now(), updated: Date.now(), thumb: null, dur: 0 };
+    ratio, bg: 'blur', fadeEnd: 1.2, ending: store.get('sc_ending', true) !== false, clips: [], layers: [], overlays: [], audio: [], beats: [], bpm: 0, duck: null, capStyle: 'classic', created: Date.now(), updated: Date.now(), thumb: null, dur: 0 };
 }
 function normVI(c, layer) {
   const d = { speed: 1, curve: 'none', volume: 1, muted: false, filter: 'none', transition: 'none', fit: 'contain', rot: 0, crop: null,
@@ -402,7 +402,7 @@ function normAu(a) { if (!a.rate) a.rate = 1; a.afx = Object.assign({ preset: 'n
 function normalize(p) {
   p.layers = p.layers || []; p.overlays = p.overlays || []; p.audio = p.audio || []; p.beats = p.beats || [];
   p.clips.forEach(c => normVI(c, false)); p.layers.forEach(c => normVI(c, true)); p.overlays.forEach(normOv); p.audio.forEach(normAu);
-  if (!p.capStyle) p.capStyle = 'classic'; p.v = 2; return p;
+  if (!p.capStyle) p.capStyle = 'classic'; if (!p.bg) p.bg = 'blur'; p.v = 2; return p;
 }
 function makeClip(m, layer) { return normVI({ id: uid(), mediaId: m.id, kind: m.kind, in: 0, out: m.kind === 'image' ? 3 : m.duration }, layer); }
 
@@ -444,6 +444,12 @@ function layout() { let t = 0; for (const c of P.clips) { c._start = t; t += cli
    delete it for this video or for every new project; Format turns it back on. */
 const END_LEN = 2.5;
 const endLen = () => P && P.ending && P.clips.length ? END_LEN : 0;
+// Fade out at the end (P.fadeEnd seconds): picture to black and sound to silence, just before the end card if there is one.
+function endFade(t) {
+  if (!P || !P.fadeEnd) return 1;
+  const end = endLen() ? P._main : duration();
+  return t >= end - 1e-4 ? (endLen() ? 1 : 0) : clamp((end - t) / P.fadeEnd, 0, 1);
+}
 function duration() {
   let d = layout() + endLen();
   for (const l of P.layers) d = Math.max(d, l.start + clipLen(l));
@@ -588,7 +594,7 @@ function syncMedia(on) {
     if (active) {
       const local = t - c._start, want = srcAt(c, local), rate = clamp(rateAt(c, local), 0.0625, 16);
       if (Math.abs(v.playbackRate - rate) > 0.01) v.playbackRate = rate;
-      setGain(e, c.muted || (recording && recording.muteBed) ? 0 : c.volume);
+      setGain(e, c.muted || (recording && recording.muteBed) ? 0 : c.volume * endFade(t));
       { const mute = !!(c.muted || (recording && recording.muteBed)); if (v.muted !== mute) v.muted = mute; }
       const tol = hasCurve(c) ? 0.5 : 0.35;
       if (on) { if (Math.abs(v.currentTime - want) > tol) v.currentTime = want; if (v.paused) v.play().catch(() => {}); }
@@ -612,7 +618,7 @@ function syncMedia(on) {
       if (a.fadeIn > 0) gv *= clamp(local / a.fadeIn, 0, 1);
       if (a.fadeOut > 0) gv *= clamp((len - local) / a.fadeOut, 0, 1);
       if (a.kind === 'music' && duckNow) gv *= 1 - P.duck.amt;
-      setGain(e, recording && recording.muteBed ? 0 : gv, a.kind === 'music' && duckOn ? .12 : .02);
+      setGain(e, recording && recording.muteBed ? 0 : gv * endFade(t), a.kind === 'music' && duckOn ? .12 : .02);
       if (on) { if (Math.abs(v.currentTime - want) > 0.3) v.currentTime = want; if (v.paused) v.play().catch(() => {}); }
       else { if (!v.paused) v.pause(); if (Math.abs(v.currentTime - want) > 0.05) v.currentTime = want; }
     } else { if (!v.paused) v.pause(); }
@@ -969,6 +975,7 @@ function draw() {
   else if (endLen() && t >= P._main - 1e-6) drawEnding(g, W, H, t - P._main);
   for (const l of P.layers) if (t >= l._start && t < l._start + clipLen(l)) drawVI(g, l, t, W, H, false);
   drawOverlays(g, W, H, t);
+  { const fe = endFade(t); if (fe < 1) { g.globalAlpha = 1; g.globalCompositeOperation = 'source-over'; g.fillStyle = `rgba(0,0,0,${(1 - fe).toFixed(3)})`; g.fillRect(0, 0, W, H); } }
   if (!exporting && !offline) { const fb = frameBox(); if (fb) drawFrame(g, fb.box); }
   if (pvGuides && !exporting && !offline) drawGuides(g, W, H, pvGuides);
   freeCanvases(drawnIds);
@@ -1095,13 +1102,21 @@ function drawOverlays(ctx, W, H, t) {
       default: { const x = TEXT_ANIM_X[o.anim]; if (x) { const st = { alpha, sc, dy, dx, rot, sx, sy, blur: 0, track: 0, letters: null }; x[1](st, local, len, t, W, H); ({ alpha, sc, dy, dx, rot, sx, sy } = st); blurK = st.blur; track = st.track; letters = st.letters; } }
     }
     if (o.anim && o.anim !== 'none') alpha *= outP;
-    const px = (o.size || 6) / 100 * H, f = FONTS[o.font] || FONTS.classic;
+    let px = (o.size || 6) / 100 * H; const f = FONTS[o.font] || FONTS.classic;
     ctx.save();
     ctx.globalAlpha = clamp(alpha, 0, 1);
     const tw = tf.w || 1, th = tf.h || 1;
     ctx.translate(tf.x * W + dx, tf.y * H + dy); ctx.rotate(rot * Math.PI / 180); ctx.scale(sc * tw * sx, sc * th * sy);
     if (blurK > .005) ctx.filter = `blur(${(blurK * px).toFixed(1)}px)`;
-    ctx.font = o.type === 'sticker' ? `${px}px "Noto Color Emoji","Apple Color Emoji","Segoe UI Emoji",sans-serif` : `${f[1]} ${px}px ${f[2]}`;
+    const setFont = q => { ctx.font = o.type === 'sticker' ? `${q}px "Noto Color Emoji","Apple Color Emoji","Segoe UI Emoji",sans-serif` : `${f[1]} ${q}px ${f[2]}`; };
+    setFont(px);
+    // Text is never wider than the frame at its normal size: a long line gets smaller instead of running off the
+    // screen. Pinching it bigger on purpose still works on top of this.
+    if (o.type === 'text') {
+      const sp0 = o.spacing || 0; if ('letterSpacing' in ctx) ctx.letterSpacing = sp0 ? `${(sp0 * px / 100).toFixed(1)}px` : '0px';
+      const w0 = Math.max(...String(text || ' ').split('\n').map(l => ctx.measureText(l || ' ').width)) + px * .7, lim = W * .9;
+      if (w0 > lim) { px *= lim / w0; setFont(px); }
+    }
     { const sp = (o.spacing || 0) + track; if ('letterSpacing' in ctx) ctx.letterSpacing = sp ? `${(sp * px / 100).toFixed(1)}px` : '0px'; }
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     const lines = String(text || ' ').split('\n'), lh = px * 1.18;
@@ -1229,6 +1244,8 @@ function viTags(c) {
 }
 function renderTimeline() {
   if (!P) return;
+  // Undo or Cancel can bring back another frame shape (auto edit may change it); the preview follows.
+  { const [ra, rb] = RATIOS[P.ratio] || [9, 16]; if (cv.width && Math.abs(cv.width / cv.height - ra / rb) > .02) setCanvasSize(PREVIEW_LONG); }
   const D = duration(), pd = pad(), wpx = Math.max(1, D * pps);
   $('#tlIn').style.width = Math.max(wpx + pd * 2, dragging ? dragging.w0 : 0) + 'px';
   const step = pps >= 160 ? 0.5 : pps >= 70 ? 1 : pps >= 30 ? 2 : pps >= 14 ? 5 : 10;
@@ -3184,7 +3201,7 @@ const REEL_STYLES = {
     title: { font: 'black', size: 10, color: '#ffffff', stroke: true, anim: 'stamp' }, sub: { font: 'cond', size: 4, color: '#ffd23f', anim: 'slidel' }, endAnim: 'elastic', titleSfx: 'cinehit' },
   cinematic: { name: 'Cinematic', bpm: 90, music: 'cinematic', cut: [4, 2, 4, 4], rate: .5, filter: 'cool',
     trans: ['fade', 'blur', 'defocus', 'leak', 'zoomout', 'dolly', 'filmburn', 'doorsh', 'flare', 'fold'],
-    sfx: ['whooshdeep', 'whoosh2', 'airswoosh', 'risershort', 'downlifter', 'braam'], fx: { letterbox: .55, grain: .18 }, accent: ['bloom', 'lightleak', 'dreamy'],
+    sfx: ['whooshdeep', 'whoosh2', 'airswoosh', 'risershort', 'downlifter', 'braam'], fx: { grain: .18 }, accent: ['bloom', 'lightleak', 'dreamy'],
     combos: ['kenburns', 'zoomslow', 'zoomoutslow', 'kenburns', 'parallax'], ins: ['fade', 'cinematic', 'blur', 'floatin'], first: 'cinematic',
     title: { font: 'light', size: 7, color: '#ffffff', shadow: true, spacing: 40, anim: 'trackin' }, sub: { font: 'light', size: 3.4, color: '#e0c287', spacing: 30, anim: 'fadeletters' }, endAnim: 'blurin', titleSfx: 'braam' },
   chill: { name: 'Chill', bpm: 84, music: 'chill', cut: [4, 2, 4], rate: .45, filter: 'dream',
@@ -3206,19 +3223,23 @@ const REEL_STYLES = {
     title: { font: 'black', size: 9, color: '#ff4ecd', grad: 'neon', depth: 1, stroke: false, anim: 'roll3d' }, sub: { font: 'mono', size: 3.6, color: '#ffffff', anim: 'typepop' }, endAnim: 'glitch2', titleSfx: 'rewindfx' },
   luxury: { name: 'Luxury', bpm: 92, music: 'cinematic', cut: [4, 4, 2], rate: .45, filter: 'matte',
     trans: ['fade', 'leak', 'flare', 'dolly', 'fold', 'flipv3d', 'diamond', 'bloomflash'], sfx: ['shimmer', 'whoosh2', 'airswoosh', 'chime'],
-    fx: { letterbox: .35 }, accent: ['bloom', 'sparkle', 'dreamy'], combos: ['kenburns', 'zoomslow', 'zoomoutslow', 'pushinloop'], ins: ['fade', 'cinematic', 'unfold', 'flipv3d'], first: 'cinematic',
+    fx: {}, accent: ['bloom', 'sparkle', 'dreamy'], combos: ['kenburns', 'zoomslow', 'zoomoutslow', 'pushinloop'], ins: ['fade', 'cinematic', 'unfold', 'flipv3d'], first: 'cinematic',
     title: { font: 'light', size: 8, color: '#e2b33c', grad: 'gold', shadow: true, spacing: 50, anim: 'trackin' }, sub: { font: 'serif', size: 3.6, color: '#f1ede6', anim: 'fadeletters' }, endAnim: 'blurin', titleSfx: 'shimmer' }
 };
 function reelSheet() {
   const vids = P.clips.filter(c => c.kind === 'video' && !hasCurve(c));
   if (!vids.length) { toast('Auto edit needs video clips. Add some first.'); return; }
-  const hasMusic = P.audio.some(a => a.kind === 'music');
-  const o = { style: 'energetic', len: 30, music: true, titles: true, trans: true, sfx: true, grade: true, title: (P.name || '').startsWith('Project ') ? 'HIGHLIGHTS' : P.name, sub: new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' }) };
+  const mine = [...new Set(P.audio.filter(a => a.kind === 'music' && media[a.mediaId]).map(a => a.mediaId))];
+  const o = { style: 'energetic', len: 30, music: true, titles: true, trans: true, sfx: true, grade: true, frame: 'auto', bg: 'blur', songs: mine.slice(0, 3), count: clamp(mine.length || 1, 1, 3),
+    title: (P.name || '').startsWith('Project ') ? 'HIGHLIGHTS' : P.name, sub: new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' }) };
   openSheet('Auto edit', `<div class="lab">Style</div>${chipRow('rs', Object.fromEntries(Object.entries(REEL_STYLES).map(([k, v]) => [k, v.name])), o.style)}
     <div class="lab">Length</div>${chipRow('rl', { 15: '15 s', 30: '30 s', 60: '60 s', 90: '90 s' }, o.len)}
+    <div class="lab">Frame</div>${chipRow('rf', { auto: 'Match my videos', keep: `Keep ${P.ratio}` }, o.frame)}
+    <div class="lab">Where a video does not fill the frame</div>${chipRow('rb', { blur: 'Blurred video', black: 'Black', fill: 'Zoom to fill' }, o.bg)}
     <div class="row"><label for="rTitle">Title</label><input class="inp" id="rTitle" maxlength="40" value="${esc(o.title)}"></div>
     <div class="row"><label for="rSub">Subtitle</label><input class="inp" id="rSub" maxlength="50" value="${esc(o.sub)}"></div>
-    ${toggleRow('rMu', hasMusic ? 'Use your music' : 'Add music', hasMusic ? 'Cuts land on the beat of your song' : 'A matching track is composed on your phone and cuts land on its beat', o.music)}
+    ${toggleRow('rMu', 'Music', 'Cuts land on the beat, and the video fades out with the music at the end', o.music)}
+    <div id="rSongs"></div>
     ${toggleRow('rTi', 'Title and end card', 'Animated opening title and a closing card', o.titles)}
     ${toggleRow('rTr', 'Transitions', 'Different transitions on some cuts, chosen to fit the style', o.trans)}
     ${toggleRow('rGr', 'Look, effects and motion', 'A colour grade, accent effects on the best moments and gentle camera moves', o.grade)}
@@ -3226,10 +3247,58 @@ function reelSheet() {
     <button type="button" class="btn ai full" id="rGo">Make the edit</button>
     <p class="note">Your clips are not deleted: Undo brings your full edit back. Long videos are scanned in small steps so the phone does not run out of memory.</p>`,
   r => {
-    bindChips(r, 'rs', v => { o.style = v; }); bindChips(r, 'rl', v => { o.len = +v; });
-    bindToggle(r, 'rMu', v => { o.music = v; }); bindToggle(r, 'rTi', v => { o.titles = v; }); bindToggle(r, 'rTr', v => { o.trans = v; }); bindToggle(r, 'rGr', v => { o.grade = v; }); bindToggle(r, 'rSf', v => { o.sfx = v; });
+    const songs = () => {
+      const box = $('#rSongs', r); if (!box) return;
+      box.hidden = !o.music;
+      box.innerHTML = `<div class="lab">How many songs</div>${chipRow('rn', { 1: '1 song', 2: '2 songs', 3: '3 songs' }, o.count)}
+        <div class="songlist">${o.songs.map((id, i) => `<div class="song"><span>${i + 1}. ${esc(media[id] ? media[id].name : 'Song')}</span><button type="button" class="cap-x" data-rm="${id}" aria-label="Remove this song">${icon('close')}</button></div>`).join('')}</div>
+        ${o.songs.length < 3 ? '<button type="button" class="btn full" id="rAdd">Add songs from your phone</button>' : ''}
+        <p class="note">${o.count > 1 ? 'Each song plays its liveliest part and blends into the next.' : 'The liveliest part of the song is used.'}${o.count > o.songs.length ? ` ${o.count - o.songs.length === 1 ? 'One song is' : (o.count - o.songs.length) + ' songs are'} composed to match the style.` : ''}</p>`;
+      bindChips(box, 'rn', v => { o.count = +v; songs(); });
+      box.querySelectorAll('[data-rm]').forEach(b => { b.onclick = () => { o.songs = o.songs.filter(x => x !== b.dataset.rm); songs(); }; });
+      const add = $('#rAdd', box); if (add) add.onclick = async () => {
+        const files = await pickFiles('audio/*', true); if (!files.length) return;
+        busy.show('Importing music'); const ms = await importFiles(files.slice(0, 3 - o.songs.length)); busy.hide();
+        ms.forEach(m => { if (!o.songs.includes(m.id)) o.songs.push(m.id); }); o.count = clamp(Math.max(o.count, o.songs.length), 1, 3); songs();
+      };
+    };
+    songs();
+    bindChips(r, 'rs', v => { o.style = v; }); bindChips(r, 'rl', v => { o.len = +v; }); bindChips(r, 'rf', v => { o.frame = v; }); bindChips(r, 'rb', v => { o.bg = v; });
+    bindToggle(r, 'rMu', v => { o.music = v; songs(); }); bindToggle(r, 'rTi', v => { o.titles = v; }); bindToggle(r, 'rTr', v => { o.trans = v; }); bindToggle(r, 'rGr', v => { o.grade = v; }); bindToggle(r, 'rSf', v => { o.sfx = v; });
     $('#rGo', r).onclick = () => { o.title = $('#rTitle', r).value.trim(); o.sub = $('#rSub', r).value.trim(); closeSheet(); autoReel(o); };
   });
+}
+// Places the songs one after another across the edit: each plays its liveliest part and blends into the next.
+// Songs the user did not give are composed, each in a different feel.
+async function placeSongs(o, S, songs, D) {
+  const n = clamp(o.count || 1, 1, 3), seg = D / n, ov = n > 1 ? Math.min(2, seg * .25) : 0, vol = P.clips.some(c => c.kind === 'video' && !c.muted) ? .6 : .85;
+  const feels = [S.music, ...['energetic', 'chill', 'cinematic'].filter(g => g !== S.music)];
+  P.audio = P.audio.filter(a => a.kind !== 'music'); P.beats = [];
+  for (let i = 0; i < n; i++) {
+    const start = Math.max(0, i * seg - (i ? ov / 2 : 0)), L = Math.min(D - start, seg + (i ? ov / 2 : 0) + (i < n - 1 ? ov / 2 : 0));
+    let m = songs[i], s0 = 0, beats = [];
+    busy.text(n > 1 ? `Mixing song ${i + 1} of ${n}` : m ? 'Fitting your music' : 'Composing the music'); busy.pct(.82 + i * .03);
+    if (m) {
+      s0 = await liveliest(m, L);
+      const res = await detectBeats({ mediaId: m.id, in: s0, out: Math.min(m.duration, s0 + L), start: 0, rate: 1 }); if (res) beats = res.beats;
+    } else {
+      const key = Object.keys(REEL_STYLES).find(k => REEL_STYLES[k].music === feels[i % feels.length]) || o.style;
+      const mus = await renderMusic(i ? key : o.style, L + .5);
+      m = await addMediaRecord('audio', `Music · ${REEL_STYLES[i ? key : o.style].name}`, wavBlob(mus.buf.getChannelData(0), mus.buf.sampleRate), mus.buf.duration);
+      beats = mus.beats; if (!i) P.bpm = mus.bpm;
+    }
+    const a = addAudioItem(m, 'music', start); a.in = s0; a.out = Math.min(m.duration, s0 + L); a.volume = vol;
+    a.fadeIn = i ? ov : .4; a.fadeOut = i === n - 1 ? 1.8 : ov;
+    const lo = start + (i ? ov / 2 : 0), hi = start + L - (i < n - 1 ? ov / 2 : 0);
+    P.beats.push(...beats.map(b => +(b + start).toFixed(3)).filter(b => b >= lo && b < hi && b <= D + .01));
+  }
+}
+// Where in a song its most energetic stretch of L seconds starts (the quiet intro is skipped).
+async function liveliest(m, L) {
+  const buf = await decodeLite(m); if (!buf || m.duration <= L + 1) return 0;
+  const r = rmsWindows(buf, 0, m.duration, 1), w = Math.max(1, Math.round(L)); let best = 0, bs = -1;
+  for (let k = Math.min(8, Math.floor(r.length * .1)); k + w <= r.length; k++) { let s = 0; for (let j = k; j < k + w; j++) s += r[j]; if (s > bs) { bs = s; best = k; } }
+  return best;
 }
 // Composes a short music bed (drums, bass, chords) in the chosen style, so the auto edit needs no download.
 async function renderMusic(style, dur) {
@@ -3306,8 +3375,9 @@ async function autoReel(o) {
 }
 async function buildReel(o, S, vids) {
   const rnd = seeded(Date.now()), pick = (arr, avoid) => { const a = arr.filter(x => x !== avoid); return a.length ? a[Math.floor(rnd() * a.length)] : arr[0]; };
-  let mu = P.audio.find(a => a.kind === 'music'), bpm = S.bpm, beats = null;
-  if (o.music && mu) { busy.text('Listening to your music'); const res = await detectBeats(mu); if (res) { bpm = res.bpm; beats = res.beats; } }
+  const songs = o.music ? (o.songs || []).map(id => media[id]).filter(Boolean).slice(0, o.count || 1) : [];
+  let bpm = S.bpm;
+  if (songs[0]) { busy.text('Listening to your music'); const res = await detectBeats({ mediaId: songs[0].id, in: 0, out: songs[0].duration, start: 0, rate: 1 }); if (res) bpm = res.bpm; }
   const beat = 60 / bpm;
   // 1. Score every moment of every clip: movement in the picture and how loud it is. Long clips are looked at
   //    less often, so a long video needs no more memory or time than a short one.
@@ -3378,9 +3448,22 @@ async function buildReel(o, S, vids) {
     }
     return c;
   });
+  // A short edit still gets at least one transition when transitions are on.
+  if (o.trans && clips.length > 1 && !clips.some(c => c.transition !== 'none')) { const c = clips[Math.floor((clips.length - 1) / 2)]; c.transition = pick(S.trans); if (o.sfx) c.trSfx = pick(S.sfx); }
   // Now and then a clip makes its own entrance, but only after a plain cut.
   for (let k = 1; k < clips.length; k++) if (o.grade && clips[k - 1].transition === 'none' && rnd() < .3) clips[k].anim.in = pick(S.ins);
   P.clips = clips;
+  // Frame: the shape of most of the chosen video. A video that does not fill it gets the chosen background
+  // (a blurred copy of itself unless Black or Zoom to fill was picked), never plain black by default.
+  if (o.frame !== 'keep') {
+    let por = 0, lan = 0, sq = 0;
+    for (const c of clips) { const m = media[c.mediaId], d = c.out - c.in; if (!m || !m.w || !m.h) continue; const k = m.w / m.h; if (k < .9) por += d; else if (k > 1.1) lan += d; else sq += d; }
+    const ratio = por >= lan && por >= sq ? '9:16' : lan >= sq ? '16:9' : '1:1';
+    if (por + lan + sq > 0 && ratio !== P.ratio) { P.ratio = ratio; setCanvasSize(PREVIEW_LONG); }
+  }
+  P.bg = o.bg === 'black' ? '#000000' : 'blur';
+  clips.forEach(c => { c.fit = o.bg === 'fill' ? 'cover' : 'contain'; });
+  P.fadeEnd = 1.5;
   layout(); const D = P._main;
   // Titles: an opening title with a subtitle, and a closing card.
   P.overlays = P.overlays.filter(x => !x.reel);
@@ -3390,14 +3473,8 @@ async function buildReel(o, S, vids) {
     if (o.sub) P.overlays.push(normOv({ id: uid(), ...base, shadow: true, text: o.sub, start: .55, end: tLen, y: .53, ...deep(S.sub) }));
     if (D > 6) P.overlays.push(normOv({ id: uid(), ...base, shadow: true, text: o.title ? `${o.title}\nThanks for watching` : 'Thanks for watching', start: Math.max(tLen + .5, D - 2.4), end: D, y: .5, ...deep(S.title), size: S.title.size * .62, anim: S.endAnim }));
   }
-  // Music: keep the user's song, or compose one to fit.
-  if (o.music && !mu) {
-    busy.text('Composing the music'); busy.pct(.84);
-    const mus = await renderMusic(o.style, D + .5);
-    const mm = await addMediaRecord('audio', `Music · ${S.name}`, wavBlob(mus.buf.getChannelData(0), mus.buf.sampleRate), mus.buf.duration);
-    mu = addAudioItem(mm, 'music', 0); mu.out = Math.min(mm.duration, D); mu.fadeIn = .4; mu.fadeOut = 1.6; beats = mus.beats; bpm = mus.bpm;
-  }
-  if (mu) { mu.volume = P.clips.some(c => c.kind === 'video' && !c.muted) ? .6 : .85; if (beats) { P.beats = beats.filter(b => b <= D + .01); P.bpm = bpm; } }
+  // Music: the user's songs (their liveliest parts, blended) or composed tracks.
+  if (o.music) { P.bpm = bpm; await placeSongs(o, S, songs, D); }
   if (o.music) P.clips.forEach(c => { c.volume = Math.min(c.volume, .7); });
   // Cut sounds now live on the cuts; sound items from earlier auto edits are removed.
   P.audio = P.audio.filter(a => !a.reel);
@@ -3520,10 +3597,11 @@ const PREVIEW_LONG = 960;
 function formatSheet() {
   const cols = ['#000000', '#ffffff', '#1c1c1c', '#c9a45c', '#e8e1d5', '#2b3a4a', '#4a2b2b', '#2f3b2c'];
   openSheet('Format', `<div class="lab">Aspect ratio</div>${chipRow('ratio', { '9:16': '9:16 TikTok · Reels', '16:9': '16:9 YouTube', '1:1': '1:1 Square', '4:5': '4:5 Instagram', '3:4': '3:4', '21:9': '21:9 Cinema' }, P.ratio)}
-    <div class="lab">Background behind fitted clips</div>${chipRow('bg', { blur: 'Blurred clip', black: 'Black', white: 'White' }, P.bg)}
+    <div class="lab">Background where a clip does not fill the frame</div>${chipRow('bg', { blur: 'Blurred clip', black: 'Black', white: 'White' }, P.bg)}
     <div class="swatches" id="bgCol">${cols.map(c => `<button type="button" class="swatch" style="background:${c}" data-c="${c}" aria-label="Background ${c}" aria-pressed="${P.bg === c}"></button>`).join('')}<input type="color" id="bgPick" value="${/^#/.test(P.bg) ? P.bg : '#1c1c1c'}" aria-label="Custom background colour"></div>
-    ${toggleRow('fEnd', 'Ending', 'A short SplashCut end card after your video', !!P.ending)}${toggleRow('fEndNew', 'Ending on new projects', 'Start every new project with the end card', store.get('sc_ending', true) !== false)}`,
+    ${toggleRow('fFade', 'Fade out at the end', 'The picture and sound fade out over the last moment', !!P.fadeEnd)}${toggleRow('fEnd', 'Ending', 'A short SplashCut end card after your video', !!P.ending)}${toggleRow('fEndNew', 'Ending on new projects', 'Start every new project with the end card', store.get('sc_ending', true) !== false)}`,
   r => {
+    bindToggle(r, 'fFade', v => { P.fadeEnd = v ? 1.2 : 0; commit(); });
     bindToggle(r, 'fEnd', v => { P.ending = v; commit(); seekTo(Math.min(T, duration())); });
     bindToggle(r, 'fEndNew', v => store.set('sc_ending', v));
     bindChips(r, 'ratio', v => { P.ratio = v; setCanvasSize(PREVIEW_LONG); commit(); });
